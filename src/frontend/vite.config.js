@@ -13,7 +13,7 @@ process.env.STORAGE_GATEWAY_URL =
   process.env.STORAGE_GATEWAY_URL || "https://blob.caffeine.ai";
 
 export default defineConfig({
-  base: "/Ai-interview/",
+  base: "/ai-interview/",
   logLevel: "error",
   build: {
     emptyOutDir: true,
