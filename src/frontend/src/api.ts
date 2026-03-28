@@ -1,5 +1,5 @@
 const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycby_uGk_hH6z7gbF8-V7VkVha-qxse7n3vPyx8tMp3dzZNfSbT0QK4zMgmpRVihhwSYY/exec";
+  "https://script.google.com/macros/s/AKfycbwFSRv0VUj2Blm6-CgseMuuhCY5JjKPCGi6dUOXhDlSpPi5bGWbx2Z6Nt-kMggKSXlL/exec";
 
 export interface Question {
   uid: string;
