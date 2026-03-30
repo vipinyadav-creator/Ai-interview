@@ -34,7 +34,7 @@ const isHindiText = (text: string) => /[\u0900-\u097F]/.test(text);
 
 export default function InterviewScreen() {
   const { state, setState } = useApp();
-  const { t, lang, toggleLang } = useLang();
+  const { t, lang } = useLang();
   const { questions, candidateName, department, designation, maxSwitch } =
     state;
 
@@ -269,8 +269,13 @@ export default function InterviewScreen() {
             noiseSuppression: false,
             autoGainControl: false,
           },
-          video: true,
+          video: { facingMode: "user" },
         });
+
+        // Explicitly ensure tracks are enabled
+        micStream.getAudioTracks().forEach((t) => (t.enabled = true));
+        micStream.getVideoTracks().forEach((t) => (t.enabled = true));
+
         streamRef.current = micStream;
 
         // Try to set up AudioContext mixing (mic in one stream)
@@ -508,14 +513,7 @@ export default function InterviewScreen() {
             </span>
           </div>
 
-          {/* Language toggle */}
-          <button
-            type="button"
-            onClick={toggleLang}
-            className="text-xs font-semibold px-2 sm:px-2.5 py-1 rounded-full bg-white border border-border text-brand-blue hover:bg-secondary transition-colors"
-          >
-            {lang === "en" ? "हिं" : "EN"}
-          </button>
+          {/* Fit to English only (language switch removed) */}
 
           {/* Finish button */}
           <Button

@@ -10,13 +10,10 @@ interface LangContextType {
 const LangContext = createContext<LangContextType | null>(null);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const stored = (localStorage.getItem("interview_lang") as Lang) || "en";
-  const [lang, setLang] = useState<Lang>(stored);
+  const [lang] = useState<Lang>("en");
 
   const toggleLang = () => {
-    const next: Lang = lang === "en" ? "hi" : "en";
-    setLang(next);
-    localStorage.setItem("interview_lang", next);
+    // Language toggle disabled; always English
   };
 
   return (
