@@ -17,7 +17,6 @@ export interface AppState {
   screenSwitchCount: number;
   recordedBlob: Blob | null;
   selectedQuestionUIDs: string[];
-  photos: { question: number; photo: string }[];
 }
 
 interface AppContextType {
@@ -45,7 +44,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     screenSwitchCount: 0,
     recordedBlob: null,
     selectedQuestionUIDs: [],
-    photos: [],
   });
 
   const setState = (patch: Partial<AppState>) =>

@@ -15,7 +15,6 @@ import {
   startResumableUpload,
   uploadAudioToDrive,
   uploadChunk,
-  base64ToBlob,
 } from "../api";
 
 const CHUNK_SIZE = 512 * 1024; // 512 KB
@@ -70,20 +69,6 @@ export default function UploadScreen() {
         }
       } catch {
         // Drive upload optional - continue
-      }
-
-      // Upload photos to Drive
-      if (state.photos && state.photos.length > 0) {
-        for (const { question, photo } of state.photos) {
-          const base64 = photo.split(',')[1];
-          const photoBlob = base64ToBlob(base64, 'image/jpeg');
-          const photoFileName = `photo_q${question}.jpg`;
-          try {
-            await uploadAudioToDrive(photoBlob, photoFileName, "1fG8ga3uzzQQCa-rZqCxs_Lhm4vXuQJkp");
-          } catch {
-            // ignore
-          }
-        }
       }
 
       const { uploadId } = await startResumableUpload(

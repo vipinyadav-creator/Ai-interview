@@ -10,7 +10,7 @@ import { initInterview, requestOtp, verifyOtp } from "../api";
 
 export default function OtpScreen() {
   const { state, setState } = useApp();
-  const { t, lang, toggleLang } = useLang();
+  const { t, lang } = useLang();
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
@@ -81,17 +81,6 @@ export default function OtpScreen() {
 
   return (
     <div className="min-h-screen bg-background glow-bg flex flex-col items-center justify-center p-4 overflow-x-hidden">
-      {/* Language toggle - positioned relative to header flow, not overlapping brand */}
-      <div className="w-full max-w-md flex justify-end mb-4">
-        <button
-          type="button"
-          onClick={toggleLang}
-          className="text-xs font-semibold px-3 py-1.5 rounded-full bg-white border border-border text-brand-blue hover:bg-secondary transition-colors shadow-sm"
-        >
-          {lang === "en" ? "हिं" : "EN"}
-        </button>
-      </div>
-
       {/* Brand */}
       <div className="flex items-center gap-2.5 mb-6 sm:mb-8">
         <div className="w-10 h-10 rounded-xl bg-brand-blue flex items-center justify-center shadow-glow">

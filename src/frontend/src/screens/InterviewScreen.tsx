@@ -63,10 +63,6 @@ export default function InterviewScreen() {
   // Debounce ref for screen switch tracking — prevents double-counting
   const lastSwitchTime = useRef(0);
 
-  // Refs for camera photo capture
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
   // AudioContext refs for mixing mic into one stream
   const audioCtxRef = useRef<AudioContext | null>(null);
   const audioDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
@@ -92,22 +88,6 @@ export default function InterviewScreen() {
       ttsFallbackRef.current = null;
     }
   }, []);
-
-  // Take photo silently
-  const takePhoto = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current) return;
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0);
-    const photoData = canvas.toDataURL('image/jpeg', 0.8);
-    const photos = JSON.parse(localStorage.getItem('interview_photos') || '[]');
-    photos.push({ question: currentIdx + 1, photo: photoData });
-    localStorage.setItem('interview_photos', JSON.stringify(photos));
-  }, [currentIdx]);
 
   // --- Screen switch tracking ---
   // Bug fix: debounce within 500ms so visibilitychange + blur firing together
@@ -286,23 +266,8 @@ export default function InterviewScreen() {
         return;
       }
 
-      let combinedStream = new MediaStream(audioStream.getAudioTracks());
-      try {
-        const videoStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-        });
-        videoStream.getVideoTracks().forEach((t) => (t.enabled = true));
-        videoRef.current && (videoRef.current.srcObject = videoStream);
-        videoRef.current && videoRef.current.play().catch(() => {});
-        videoStream.getVideoTracks().forEach((track) => combinedStream.addTrack(track));
-      } catch {
-        toast.warning("Camera access not granted or blocked. Interview will continue with audio only.");
-      }
-
-      streamRef.current = combinedStream;
-
-      // Try to set up AudioContext mixing (mic in one stream)
-      let recordStream: MediaStream = combinedStream;
+      let recordStream: MediaStream = audioStream;
+      streamRef.current = audioStream;
       try {
         const audioCtx = new AudioContext();
         audioCtxRef.current = audioCtx;
@@ -312,8 +277,6 @@ export default function InterviewScreen() {
 
         const micSource = audioCtx.createMediaStreamSource(audioStream);
         micSource.connect(dest);
-
-        recordStream = combinedStream;
       } catch (_) {
         audioCtxRef.current = null;
         audioDestRef.current = null;
@@ -349,14 +312,6 @@ export default function InterviewScreen() {
     );
   }, [currentIdx, speakQuestion, startTimer, questions]);
 
-  // Take photo on specific questions
-  useEffect(() => {
-    const questionNum = currentIdx + 1;
-    if ([1,7,11,13,20].includes(questionNum)) {
-      setTimeout(() => takePhoto(), 1000); // delay 1s after question starts
-    }
-  }, [currentIdx, takePhoto]);
-
   const finishInterview = useCallback(
     (uids: string[], sc: number) => {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -377,7 +332,6 @@ export default function InterviewScreen() {
           recordedBlob: blob,
           selectedQuestionUIDs: uids,
           screenSwitchCount: sc,
-          photos: JSON.parse(localStorage.getItem('interview_photos') || '[]'),
         });
       };
       if (mrKeepAliveRef.current) {
@@ -481,9 +435,6 @@ export default function InterviewScreen() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col overflow-x-hidden">
-      {/* Hidden video and canvas for photo capture */}
-      <video ref={videoRef} style={{ display: 'none' }} />
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
       {/* Top bar */}
       <header className="flex items-center justify-between px-3 sm:px-8 py-3 border-b border-border bg-white/95 backdrop-blur-sm sticky top-0 z-10">
         {/* Brand */}

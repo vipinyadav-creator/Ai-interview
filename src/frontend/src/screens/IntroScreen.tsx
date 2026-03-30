@@ -9,7 +9,7 @@ import { useLang } from "../LanguageContext";
 
 export default function IntroScreen() {
   const { state, setState } = useApp();
-  const { t, lang, toggleLang } = useLang();
+  const { t, lang } = useLang();
   const [agreed, setAgreed] = useState(false);
   const [requestingMic, setRequestingMic] = useState(false);
 
@@ -42,13 +42,6 @@ export default function IntroScreen() {
           <Badge className="bg-status-amber/15 text-status-amber border-status-amber/30 text-xs">
             {state.questions.length} {t.questionsLabel}
           </Badge>
-          <button
-            type="button"
-            onClick={toggleLang}
-            className="text-xs font-semibold px-2.5 sm:px-3 py-1.5 rounded-full bg-white border border-border text-brand-blue hover:bg-secondary transition-colors shadow-sm"
-          >
-            {lang === "en" ? "हिं" : "EN"}
-          </button>
         </div>
       </header>
 
@@ -66,7 +59,7 @@ export default function IntroScreen() {
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">{t.name}</p>
-                  <p className="text-sm font-semibold text-foreground truncate">
+                  <p className="text-sm font-semibold text-foreground truncate w-full break-words">
                     {state.candidateName}
                   </p>
                 </div>
@@ -79,7 +72,7 @@ export default function IntroScreen() {
                   <p className="text-xs text-muted-foreground">
                     {t.department}
                   </p>
-                  <p className="text-sm font-semibold text-foreground truncate">
+                  <p className="text-sm font-semibold text-foreground truncate w-full break-words">
                     {state.department}
                   </p>
                 </div>
@@ -92,7 +85,7 @@ export default function IntroScreen() {
                   <p className="text-xs text-muted-foreground">
                     {t.designation}
                   </p>
-                  <p className="text-sm font-semibold text-foreground truncate">
+                  <p className="text-sm font-semibold text-foreground truncate w-full break-words">
                     {state.designation}
                   </p>
                 </div>

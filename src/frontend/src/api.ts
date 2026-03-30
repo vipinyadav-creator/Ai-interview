@@ -119,14 +119,12 @@ export async function uploadChunk(
 export async function uploadAudioToDrive(
   audioBlob: Blob,
   fileName: string,
-  folderId?: string,
 ): Promise<{ success: boolean; link: string }> {
   const base64 = await blobToBase64(audioBlob);
   return post("uploadAudio", {
     base64Data: base64,
     fileName,
     mimeType: audioBlob.type || "audio/webm",
-    folderId: folderId || "",
   });
 }
 
@@ -158,12 +156,4 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export function base64ToBlob(base64: string, mimeType: string): Blob {
-  const byteCharacters = atob(base64);
-  const byteNumbers = new Array(byteCharacters.length);
-  for (let i = 0; i < byteCharacters.length; i++) {
-    byteNumbers[i] = byteCharacters.charCodeAt(i);
-  }
-  const byteArray = new Uint8Array(byteNumbers);
-  return new Blob([byteArray], { type: mimeType });
-}
+
