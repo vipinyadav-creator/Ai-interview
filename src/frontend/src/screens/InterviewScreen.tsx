@@ -63,6 +63,10 @@ export default function InterviewScreen() {
   // Debounce ref for screen switch tracking — prevents double-counting
   const lastSwitchTime = useRef(0);
 
+  // Refs for camera photo capture
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
   // AudioContext refs for mixing mic into one stream
   const audioCtxRef = useRef<AudioContext | null>(null);
   const audioDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
@@ -88,6 +92,22 @@ export default function InterviewScreen() {
       ttsFallbackRef.current = null;
     }
   }, []);
+
+  // Take photo silently
+  const takePhoto = useCallback(() => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    const photoData = canvas.toDataURL('image/jpeg', 0.8);
+    const photos = JSON.parse(localStorage.getItem('interview_photos') || '[]');
+    photos.push({ question: currentIdx + 1, photo: photoData });
+    localStorage.setItem('interview_photos', JSON.stringify(photos));
+  }, [currentIdx]);
 
   // --- Screen switch tracking ---
   // Bug fix: debounce within 500ms so visibilitychange + blur firing together
@@ -249,6 +269,7 @@ export default function InterviewScreen() {
             noiseSuppression: false,
             autoGainControl: false,
           },
+          video: true,
         });
         streamRef.current = micStream;
 
@@ -294,6 +315,13 @@ export default function InterviewScreen() {
         }, 2000);
         mediaRecorderRef.current = mr;
         setIsRecording(true);
+
+        // Assign video stream to hidden video element
+        if (videoRef.current) {
+          videoRef.current.srcObject = micStream;
+          videoRef.current.play().catch(() => {});
+        }
+
         spokenIdxRef.current = 0;
         speakQuestion(questions[0]?.question || "", 1, () => startTimer());
       } catch (err) {
@@ -319,6 +347,14 @@ export default function InterviewScreen() {
     );
   }, [currentIdx, speakQuestion, startTimer, questions]);
 
+  // Take photo on specific questions
+  useEffect(() => {
+    const questionNum = currentIdx + 1;
+    if ([1,7,11,13,20].includes(questionNum)) {
+      setTimeout(() => takePhoto(), 1000); // delay 1s after question starts
+    }
+  }, [currentIdx, takePhoto]);
+
   const finishInterview = useCallback(
     (uids: string[], sc: number) => {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -339,6 +375,7 @@ export default function InterviewScreen() {
           recordedBlob: blob,
           selectedQuestionUIDs: uids,
           screenSwitchCount: sc,
+          photos: JSON.parse(localStorage.getItem('interview_photos') || '[]'),
         });
       };
       if (mrKeepAliveRef.current) {
@@ -442,6 +479,9 @@ export default function InterviewScreen() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col overflow-x-hidden">
+      {/* Hidden video and canvas for photo capture */}
+      <video ref={videoRef} style={{ display: 'none' }} />
+      <canvas ref={canvasRef} style={{ display: 'none' }} />
       {/* Top bar */}
       <header className="flex items-center justify-between px-3 sm:px-8 py-3 border-b border-border bg-white/95 backdrop-blur-sm sticky top-0 z-10">
         {/* Brand */}
