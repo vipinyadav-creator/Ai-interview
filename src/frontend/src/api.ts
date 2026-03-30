@@ -119,12 +119,16 @@ export async function uploadChunk(
 export async function uploadAudioToDrive(
   audioBlob: Blob,
   fileName: string,
+  candidateName: string,
+  interviewId: string,
 ): Promise<{ success: boolean; link: string }> {
   const base64 = await blobToBase64(audioBlob);
   return post("uploadAudio", {
     base64Data: base64,
     fileName,
     mimeType: audioBlob.type || "audio/webm",
+    candidateName,
+    interviewId,
   });
 }
 

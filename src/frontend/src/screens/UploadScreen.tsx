@@ -59,15 +59,21 @@ export default function UploadScreen() {
       setProgress(5);
       await sleep(400);
 
-      const fileName = `interview_${state.interviewId}_${Date.now()}.webm`;
+      const fileName = `${state.candidateName.replace(/\s+/g, '_')}_${state.interviewId}.webm`;
 
       try {
-        const driveRes = await uploadAudioToDrive(blob, fileName);
+        const driveRes = await uploadAudioToDrive(
+          blob,
+          fileName,
+          state.candidateName,
+          state.interviewId,
+        );
         if (driveRes.success && driveRes.link) {
           driveLink = driveRes.link;
           setAudioLink(driveLink);
         }
-      } catch {
+      } catch (err) {
+        console.warn("UploadAudioToDrive failed:", err);
         // Drive upload optional - continue
       }
 
