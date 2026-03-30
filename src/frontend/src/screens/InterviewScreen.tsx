@@ -262,73 +262,16 @@ export default function InterviewScreen() {
     if (recordingStarted.current) return;
     recordingStarted.current = true;
     (async () => {
+      let audioStream: MediaStream | null = null;
       try {
-        const micStream = await navigator.mediaDevices.getUserMedia({
+        audioStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false,
           },
-          video: { facingMode: "user" },
         });
-
-        // Explicitly ensure tracks are enabled
-        micStream.getAudioTracks().forEach((t) => (t.enabled = true));
-        micStream.getVideoTracks().forEach((t) => (t.enabled = true));
-
-        streamRef.current = micStream;
-
-        // Try to set up AudioContext mixing (mic in one stream)
-        let recordStream: MediaStream = micStream;
-        try {
-          const audioCtx = new AudioContext();
-          audioCtxRef.current = audioCtx;
-
-          const dest = audioCtx.createMediaStreamDestination();
-          audioDestRef.current = dest;
-
-          // Connect mic source to mixed destination
-          const micSource = audioCtx.createMediaStreamSource(micStream);
-          micSource.connect(dest);
-
-          // Use mixed destination stream for recording
-          // FIXED: Record from raw mic stream, NOT dest.stream
-          // AudioContext suspension (esp. during Hindi TTS) would cause dest.stream
-          // to have gaps. Raw micStream is always live regardless of AudioContext state.
-          recordStream = micStream;
-        } catch (_) {
-          // AudioContext not supported; fall back to plain mic stream
-          audioCtxRef.current = null;
-          audioDestRef.current = null;
-        }
-
-        // Choose best available mimeType
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : "audio/webm";
-
-        const mr = new MediaRecorder(recordStream, { mimeType });
-        mr.ondataavailable = (e) => {
-          if (e.data.size > 0) chunksRef.current.push(e.data);
-        };
-        mr.start(250);
-        // Keep-alive: resume recorder if it somehow pauses (can happen on some browsers)
-        mrKeepAliveRef.current = setInterval(() => {
-          if (mediaRecorderRef.current?.state === "paused") {
-            mediaRecorderRef.current.resume();
-          }
-        }, 2000);
-        mediaRecorderRef.current = mr;
-        setIsRecording(true);
-
-        // Assign video stream to hidden video element
-        if (videoRef.current) {
-          videoRef.current.srcObject = micStream;
-          videoRef.current.play().catch(() => {});
-        }
-
-        spokenIdxRef.current = 0;
-        speakQuestion(questions[0]?.question || "", 1, () => startTimer());
+        audioStream.getAudioTracks().forEach((t) => (t.enabled = true));
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
         if (
@@ -340,7 +283,61 @@ export default function InterviewScreen() {
         } else {
           toast.error(t.noMicError);
         }
+        return;
       }
+
+      let combinedStream = new MediaStream(audioStream.getAudioTracks());
+      try {
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+        });
+        videoStream.getVideoTracks().forEach((t) => (t.enabled = true));
+        videoRef.current && (videoRef.current.srcObject = videoStream);
+        videoRef.current && videoRef.current.play().catch(() => {});
+        videoStream.getVideoTracks().forEach((track) => combinedStream.addTrack(track));
+      } catch {
+        toast.warning("Camera access not granted or blocked. Interview will continue with audio only.");
+      }
+
+      streamRef.current = combinedStream;
+
+      // Try to set up AudioContext mixing (mic in one stream)
+      let recordStream: MediaStream = combinedStream;
+      try {
+        const audioCtx = new AudioContext();
+        audioCtxRef.current = audioCtx;
+
+        const dest = audioCtx.createMediaStreamDestination();
+        audioDestRef.current = dest;
+
+        const micSource = audioCtx.createMediaStreamSource(audioStream);
+        micSource.connect(dest);
+
+        recordStream = combinedStream;
+      } catch (_) {
+        audioCtxRef.current = null;
+        audioDestRef.current = null;
+      }
+
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm";
+
+      const mr = new MediaRecorder(recordStream, { mimeType });
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      mr.start(250);
+      mrKeepAliveRef.current = setInterval(() => {
+        if (mediaRecorderRef.current?.state === "paused") {
+          mediaRecorderRef.current.resume();
+        }
+      }, 2000);
+      mediaRecorderRef.current = mr;
+      setIsRecording(true);
+
+      spokenIdxRef.current = 0;
+      speakQuestion(questions[0]?.question || "", 1, () => startTimer());
     })();
   }, [t, startTimer, speakQuestion, questions]);
 
