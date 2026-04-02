@@ -1,14 +1,34 @@
-# Screen Switch Updates - Complete ✅
+# Performance & Concurrency Optimization Plan
 
-**Changes:**
-- maxSwitch: **5** (api.ts)
-- Every switch: English toast `"4 switches left. Interview will end after that."` 
-- Banner >=3: `"Careful! 3/5 used. 2 left before auto-submit."`
-- TTS rate: **1.0** (clearer, human-like)
-- Badge colors, pill updates
+## Status: Planning Phase (0/8)
 
-**Biome check:** 65 files, **0 errors** ✅
+### Step 1: Create this TODO.md [✅ DONE]
 
-**Dev server running** - test tab switches 1-5.
+### Step 2: Get user confirmation on detailed plan [✅ DONE - User approved streaming/audio first]
 
-All done!
+### Step 3: Noise Cancellation in InterviewScreen [✅ DONE]
+- Implement Motoko recording canister
+- Deploy & test
+
+### Step 4: Frontend Noise Cancellation
+- Update InterviewScreen getUserMedia
+- Add real-time WebAudio filter
+
+### Step 5: Streaming Chunk Upload [IN PROGRESS]
+- Background upload during recording
+- Remove FFmpeg conversion [IN PROGRESS]
+
+### Step 6: Lazy Loading & Optimizations
+- React.lazy screens
+- Optimize API calls
+
+### Step 7: Concurrency Testing
+- Test 5-6 simultaneous sessions
+- Verify backend handling
+
+### Step 8: Final Testing & Completion
+- End-to-end perf test
+- attempt_completion
+
+**Current Action Needed: User confirmation on plan before Step 3.**
+

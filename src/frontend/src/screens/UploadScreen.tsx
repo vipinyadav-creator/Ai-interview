@@ -16,7 +16,7 @@ import {
   uploadAudioToDrive,
   uploadChunk,
 } from "../api";
-import { convertWebmOpusToMp3 } from "../utils/audio";
+// import { useBackend } from "../hooks/useActor"; // Streaming later
 
 const CHUNK_SIZE = 512 * 1024; // 512 KB
 
@@ -47,7 +47,7 @@ export default function UploadScreen() {
 
   const runUpload = async () => {
     try {
-      let blob = state.recordedBlob;
+      const blob = state.recordedBlob;
       let driveLink = "";
 
       if (!blob || blob.size === 0) {
@@ -60,26 +60,7 @@ export default function UploadScreen() {
       setProgress(5);
       await sleep(400);
 
-      const baseFileName = `${state.candidateName.replace(/\s+/g, "_")}_${state.interviewId}`;
-      let fileName = `${baseFileName}.webm`;
-
-      // Convert recorded audio to MP3 (browser records as WebM/Opus).
-      // This makes the uploaded file play as MP3 where Drive/players depend on extension.
-      if (blob.type !== "audio/mpeg") {
-        setProgress(20);
-        try {
-          setProgress(35);
-          blob = await convertWebmOpusToMp3(blob);
-          fileName = `${baseFileName}.mp3`;
-          setProgress(50);
-        } catch (err) {
-          console.warn("MP3 conversion failed, uploading original:", err);
-          toast.warning("MP3 conversion failed. Uploading WebM instead.");
-          setProgress(25);
-        }
-      } else {
-        fileName = `${baseFileName}.mp3`;
-      }
+      const fileName = `${state.candidateName.replace(/\s+/g, '_')}_${state.interviewId}.webm`;
 
       try {
         const driveRes = await uploadAudioToDrive(

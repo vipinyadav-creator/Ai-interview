@@ -247,9 +247,10 @@ export default function InterviewScreen() {
       try {
         const micStream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 16000, // Lower for upload speed
           },
         });
         streamRef.current = micStream;
@@ -279,9 +280,12 @@ export default function InterviewScreen() {
         }
 
         // Choose best available mimeType
+        // Prefer opus for quality, fallback webm
         const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
           ? "audio/webm;codecs=opus"
-          : "audio/webm";
+          : MediaRecorder.isTypeSupported("audio/mp4") 
+            ? "audio/mp4"
+            : "audio/webm";
 
         const mr = new MediaRecorder(recordStream, { mimeType });
         mr.ondataavailable = (e) => {

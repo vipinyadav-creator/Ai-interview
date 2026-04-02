@@ -1,11 +1,12 @@
+import React, { Suspense } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { AnimatePresence, motion } from "motion/react";
 import { AppProvider, useApp } from "./AppContext";
 import { LanguageProvider } from "./LanguageContext";
-import InterviewScreen from "./screens/InterviewScreen";
-import IntroScreen from "./screens/IntroScreen";
-import OtpScreen from "./screens/OtpScreen";
-import UploadScreen from "./screens/UploadScreen";
+const InterviewScreen = React.lazy(() => import("./screens/InterviewScreen"));
+const IntroScreen = React.lazy(() => import("./screens/IntroScreen"));
+const OtpScreen = React.lazy(() => import("./screens/OtpScreen"));
+const UploadScreen = React.lazy(() => import("./screens/UploadScreen"));
 
 function Router() {
   const { state } = useApp();
@@ -21,10 +22,12 @@ function Router() {
           transition={{ duration: 0.3 }}
           className="min-h-screen"
         >
-          {state.screen === "otp" && <OtpScreen />}
-          {state.screen === "intro" && <IntroScreen />}
-          {state.screen === "interview" && <InterviewScreen />}
-          {state.screen === "upload" && <UploadScreen />}
+          <Suspense fallback={<div>Loading screen...</div>}>
+            {state.screen === "otp" && <OtpScreen />}
+            {state.screen === "intro" && <IntroScreen />}
+            {state.screen === "interview" && <InterviewScreen />}
+            {state.screen === "upload" && <UploadScreen />}
+          </Suspense>
         </motion.div>
       </AnimatePresence>
       <Toaster position="top-right" theme="light" />
