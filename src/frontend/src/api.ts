@@ -87,7 +87,7 @@ export async function initInterview(
       questionType: q.type,
       question: q.question,
     })),
-    maxSwitch: 10,
+    maxSwitch: 5,
   };
 }
 
@@ -159,5 +159,3 @@ function blobToBase64(blob: Blob): Promise<string> {
     reader.readAsDataURL(blob);
   });
 }
-
-

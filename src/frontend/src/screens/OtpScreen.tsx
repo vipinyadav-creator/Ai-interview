@@ -10,7 +10,7 @@ import { initInterview, requestOtp, verifyOtp } from "../api";
 
 export default function OtpScreen() {
   const { state, setState } = useApp();
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);

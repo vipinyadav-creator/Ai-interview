@@ -34,7 +34,7 @@ const isHindiText = (text: string) => /[\u0900-\u097F]/.test(text);
 
 export default function InterviewScreen() {
   const { state, setState } = useApp();
-  const { t, lang } = useLang();
+  const { t, lang, toggleLang } = useLang();
   const { questions, candidateName, department, designation, maxSwitch } =
     state;
 
@@ -101,10 +101,10 @@ export default function InterviewScreen() {
       lastSwitchTime.current = now;
       setSwitchCount((c) => {
         const next = c + 1;
-        if (next >= 7 && next < maxSwitch)
-          toast.warning(
-            `Tab switch ${next}/${maxSwitch}. Limit se zyada hone par auto-submit hoga.`,
-          );
+        const remaining = maxSwitch - next;
+        toast.warning(
+          `${remaining} switches left. Interview will end after that.`,
+        );
         if (next >= maxSwitch) setShowForcedQuit(true);
         return next;
       });
@@ -115,8 +115,10 @@ export default function InterviewScreen() {
       lastSwitchTime.current = now;
       setSwitchCount((c) => {
         const next = c + 1;
-        if (next >= 7 && next < maxSwitch)
-          toast.warning(`Window switch ${next}/${maxSwitch}.`);
+        const remaining = maxSwitch - next;
+        toast.warning(
+          `${remaining} switches left. Interview will end after that.`,
+        );
         if (next >= maxSwitch) setShowForcedQuit(true);
         return next;
       });
@@ -188,8 +190,8 @@ export default function InterviewScreen() {
         utterance.lang = "en-IN";
       }
 
-      // Speech rate 0.9 — slightly slower than normal for clarity
-      utterance.rate = 0.9;
+      // Speech rate 1.0 — normal human-like speed
+      utterance.rate = 1.0;
       utterance.pitch = 1.0;
       utterance.volume = 1;
 
@@ -242,16 +244,60 @@ export default function InterviewScreen() {
     if (recordingStarted.current) return;
     recordingStarted.current = true;
     (async () => {
-      let audioStream: MediaStream | null = null;
       try {
-        audioStream = await navigator.mediaDevices.getUserMedia({
+        const micStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false,
           },
         });
-        audioStream.getAudioTracks().forEach((t) => (t.enabled = true));
+        streamRef.current = micStream;
+
+        // Try to set up AudioContext mixing (mic in one stream)
+        let recordStream: MediaStream = micStream;
+        try {
+          const audioCtx = new AudioContext();
+          audioCtxRef.current = audioCtx;
+
+          const dest = audioCtx.createMediaStreamDestination();
+          audioDestRef.current = dest;
+
+          // Connect mic source to mixed destination
+          const micSource = audioCtx.createMediaStreamSource(micStream);
+          micSource.connect(dest);
+
+          // Use mixed destination stream for recording
+          // FIXED: Record from raw mic stream, NOT dest.stream
+          // AudioContext suspension (esp. during Hindi TTS) would cause dest.stream
+          // to have gaps. Raw micStream is always live regardless of AudioContext state.
+          recordStream = micStream;
+        } catch (_) {
+          // AudioContext not supported; fall back to plain mic stream
+          audioCtxRef.current = null;
+          audioDestRef.current = null;
+        }
+
+        // Choose best available mimeType
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm";
+
+        const mr = new MediaRecorder(recordStream, { mimeType });
+        mr.ondataavailable = (e) => {
+          if (e.data.size > 0) chunksRef.current.push(e.data);
+        };
+        mr.start(250);
+        // Keep-alive: resume recorder if it somehow pauses (can happen on some browsers)
+        mrKeepAliveRef.current = setInterval(() => {
+          if (mediaRecorderRef.current?.state === "paused") {
+            mediaRecorderRef.current.resume();
+          }
+        }, 2000);
+        mediaRecorderRef.current = mr;
+        setIsRecording(true);
+        spokenIdxRef.current = 0;
+        speakQuestion(questions[0]?.question || "", 1, () => startTimer());
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
         if (
@@ -263,44 +309,7 @@ export default function InterviewScreen() {
         } else {
           toast.error(t.noMicError);
         }
-        return;
       }
-
-      let recordStream: MediaStream = audioStream;
-      streamRef.current = audioStream;
-      try {
-        const audioCtx = new AudioContext();
-        audioCtxRef.current = audioCtx;
-
-        const dest = audioCtx.createMediaStreamDestination();
-        audioDestRef.current = dest;
-
-        const micSource = audioCtx.createMediaStreamSource(audioStream);
-        micSource.connect(dest);
-      } catch (_) {
-        audioCtxRef.current = null;
-        audioDestRef.current = null;
-      }
-
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-
-      const mr = new MediaRecorder(recordStream, { mimeType });
-      mr.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      mr.start(250);
-      mrKeepAliveRef.current = setInterval(() => {
-        if (mediaRecorderRef.current?.state === "paused") {
-          mediaRecorderRef.current.resume();
-        }
-      }, 2000);
-      mediaRecorderRef.current = mr;
-      setIsRecording(true);
-
-      spokenIdxRef.current = 0;
-      speakQuestion(questions[0]?.question || "", 1, () => startTimer());
     })();
   }, [t, startTimer, speakQuestion, questions]);
 
@@ -427,7 +436,7 @@ export default function InterviewScreen() {
 
   // Pill color based on switch count
   const switchPillClass =
-    switchCount >= 7
+    switchCount >= 4
       ? "bg-status-red/10 text-status-red border-status-red/30"
       : switchCount > 0
         ? "bg-status-amber/15 text-status-amber border-status-amber/35"
@@ -455,13 +464,20 @@ export default function InterviewScreen() {
             data-ocid="interview.switch_count.panel"
           >
             <Eye className="w-3 h-3 flex-shrink-0" />
-            <span className="hidden sm:inline">Tab Switches:&nbsp;</span>
+            <span className="hidden sm:inline">Switches:&nbsp;</span>
             <span>
               {switchCount}/{maxSwitch}
             </span>
           </div>
 
-          {/* Fit to English only (language switch removed) */}
+          {/* Language toggle */}
+          <button
+            type="button"
+            onClick={toggleLang}
+            className="text-xs font-semibold px-2 sm:px-2.5 py-1 rounded-full bg-white border border-border text-brand-blue hover:bg-secondary transition-colors"
+          >
+            {lang === "en" ? "हिं" : "EN"}
+          </button>
 
           {/* Finish button */}
           <Button
@@ -485,11 +501,12 @@ export default function InterviewScreen() {
       </div>
 
       {/* Warning banner */}
-      {switchCount >= 7 && switchCount < maxSwitch && (
+      {switchCount >= 3 && switchCount < maxSwitch && (
         <div className="mx-3 sm:mx-4 mt-3 bg-status-amber/10 border border-status-amber/25 rounded-xl px-3 sm:px-4 py-3 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 text-status-amber flex-shrink-0" />
           <p className="text-xs sm:text-sm text-status-amber">
-            {t.tabSwitchWarning} {switchCount}/{maxSwitch} {t.tabSwitchWarning3}
+            Careful! {switchCount}/{maxSwitch} switches used.{" "}
+            {maxSwitch - switchCount} left before auto-submit.
           </p>
         </div>
       )}

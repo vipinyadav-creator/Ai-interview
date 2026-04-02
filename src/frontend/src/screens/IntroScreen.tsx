@@ -9,7 +9,7 @@ import { useLang } from "../LanguageContext";
 
 export default function IntroScreen() {
   const { state, setState } = useApp();
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [agreed, setAgreed] = useState(false);
   const [requestingMic, setRequestingMic] = useState(false);
 
