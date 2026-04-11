@@ -12,36 +12,66 @@ async function ensureFfmpegLoaded(): Promise<void> {
   await ffmpegLoadPromise;
 }
 
-export async function convertWebmOpusToMp3(webmBlob: Blob): Promise<Blob> {
-  if (webmBlob.type === "audio/mpeg") return webmBlob;
+export async function warmAudioConversion(): Promise<void> {
+  await ensureFfmpegLoaded();
+}
+
+function getAudioExtension(mimeType: string): string {
+  switch (mimeType) {
+    case "audio/mp4":
+    case "audio/x-m4a":
+    case "audio/aac":
+      return "mp4";
+    case "audio/ogg":
+    case "audio/ogg;codecs=opus":
+      return "ogg";
+    case "audio/mpeg":
+    case "audio/mp3":
+      return "mp3";
+    case "audio/webm":
+    case "audio/webm;codecs=opus":
+    default:
+      return "webm";
+  }
+}
+
+export async function convertAudioBlobToMp3(audioBlob: Blob): Promise<Blob> {
+  if (audioBlob.type === "audio/mpeg" || audioBlob.type === "audio/mp3") {
+    return audioBlob;
+  }
 
   await ensureFfmpegLoaded();
 
   // Use simple file names inside ffmpeg FS.
-  const inputName = "input.webm";
+  const inputName = `input.${getAudioExtension(audioBlob.type)}`;
   const outputName = "output.mp3";
 
   // Convert Blob -> Uint8Array for ffmpeg FS.
-  const inputData = new Uint8Array(await webmBlob.arrayBuffer());
+  const inputData = new Uint8Array(await audioBlob.arrayBuffer());
   await ffmpeg.writeFile(inputName, inputData);
 
   try {
-    // -q:a controls audio quality; 2 is a good default.
+    // Voice-focused MP3 output: predictable size, quick encode, clear speech.
     await ffmpeg.exec([
       "-i",
       inputName,
       "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "44100",
       "-acodec",
       "libmp3lame",
-      "-q:a",
-      "2",
+      "-b:a",
+      "96k",
       outputName,
     ]);
 
     const mp3Data = await ffmpeg.readFile(outputName);
     if (mp3Data instanceof Uint8Array) {
-      const mp3ArrayBuffer = mp3Data.buffer as ArrayBuffer;
-      return new Blob([mp3ArrayBuffer], { type: "audio/mpeg" });
+      const mp3Bytes = new Uint8Array(mp3Data.byteLength);
+      mp3Bytes.set(mp3Data);
+      return new Blob([mp3Bytes.buffer], { type: "audio/mpeg" });
     }
 
     // Fallback if string encoding is returned (shouldn't happen).
@@ -60,3 +90,5 @@ export async function convertWebmOpusToMp3(webmBlob: Blob): Promise<Blob> {
     }
   }
 }
+
+export const convertWebmOpusToMp3 = convertAudioBlobToMp3;

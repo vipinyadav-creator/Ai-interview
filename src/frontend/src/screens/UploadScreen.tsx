@@ -16,6 +16,7 @@ import {
   uploadAudioToDrive,
   uploadChunk,
 } from "../api";
+import { convertAudioBlobToMp3 } from "../utils/audio";
 // import { useBackend } from "../hooks/useActor"; // Streaming later
 
 const CHUNK_SIZE = 512 * 1024; // 512 KB
@@ -58,13 +59,15 @@ export default function UploadScreen() {
 
       setStep("preparing");
       setProgress(5);
-      await sleep(400);
 
-      const fileName = `${state.candidateName.replace(/\s+/g, '_')}_${state.interviewId}.webm`;
+      const audioBlob = await convertAudioBlobToMp3(blob);
+      setProgress(15);
+
+      const fileName = `${state.candidateName.replace(/\s+/g, "_")}_${state.interviewId}.mp3`;
 
       try {
         const driveRes = await uploadAudioToDrive(
-          blob,
+          audioBlob,
           fileName,
           state.candidateName,
           state.interviewId,
@@ -82,16 +85,16 @@ export default function UploadScreen() {
         state.interviewId,
         state.token,
         fileName,
-        blob.size,
+        audioBlob.size,
       );
 
       setStep("uploading");
-      const totalChunks = Math.ceil(blob.size / CHUNK_SIZE);
+      const totalChunks = Math.ceil(audioBlob.size / CHUNK_SIZE);
 
       for (let i = 0; i < totalChunks; i++) {
         const start = i * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, blob.size);
-        const chunk = blob.slice(start, end);
+        const end = Math.min(start + CHUNK_SIZE, audioBlob.size);
+        const chunk = audioBlob.slice(start, end);
         const res = await uploadChunk(uploadId, chunk, i, totalChunks);
         const pct =
           res.progress ?? Math.round(((i + 1) / totalChunks) * 70) + 20;
@@ -126,8 +129,6 @@ export default function UploadScreen() {
       setErrorMsg(msg);
     }
   };
-
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   // audioLink stored internally for sheet, not shown to candidate
   void audioLink;

@@ -13,12 +13,75 @@ export default function IntroScreen() {
   const [agreed, setAgreed] = useState(false);
   const [requestingMic, setRequestingMic] = useState(false);
 
+  const stopStream = (stream: MediaStream | null) => {
+    if (!stream) return;
+    for (const track of stream.getTracks()) track.stop();
+  };
+
   const handleStart = async () => {
     if (!agreed) return;
     setRequestingMic(true);
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-      setState({ screen: "interview" });
+      const micPromise = navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 48000,
+          sampleSize: 16,
+        },
+      });
+
+      let displayPromise: Promise<MediaStream | null> = Promise.resolve(null);
+      if (typeof navigator.mediaDevices.getDisplayMedia === "function") {
+        toast.warning(
+          "Question voice ko bhi record karne ke liye 'This Tab' aur 'Share tab audio' select kijiye.",
+        );
+        displayPromise = navigator.mediaDevices
+          .getDisplayMedia({
+            video: true,
+            audio: true,
+            preferCurrentTab: true,
+            selfBrowserSurface: "include",
+            surfaceSwitching: "exclude",
+            systemAudio: "include",
+          } as never)
+          .then((stream) => stream)
+          .catch(() => null);
+      }
+
+      const [micResult, displayResult] = await Promise.allSettled([
+        micPromise,
+        displayPromise,
+      ]);
+
+      if (micResult.status !== "fulfilled") {
+        if (displayResult.status === "fulfilled") {
+          stopStream(displayResult.value);
+        }
+        throw micResult.reason;
+      }
+
+      const micStream = micResult.value;
+      const displayStream =
+        displayResult.status === "fulfilled" ? displayResult.value : null;
+
+      if (displayStream && displayStream.getAudioTracks().length === 0) {
+        toast.warning(
+          "Tab audio share nahi hua. Final recording me question voice shayad na aaye.",
+        );
+      } else if (!displayStream) {
+        toast.warning(
+          "Tab audio skip hua. Final recording mic-only fallback use karegi.",
+        );
+      }
+
+      setState({
+        screen: "interview",
+        preparedMicStream: micStream,
+        preparedTabStream: displayStream,
+      });
     } catch {
       toast.error(t.micPermissionError);
     } finally {

@@ -16,6 +16,8 @@ export interface AppState {
   currentQuestionIndex: number;
   screenSwitchCount: number;
   recordedBlob: Blob | null;
+  preparedMicStream: MediaStream | null;
+  preparedTabStream: MediaStream | null;
   selectedQuestionUIDs: string[];
 }
 
@@ -43,6 +45,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     currentQuestionIndex: 0,
     screenSwitchCount: 0,
     recordedBlob: null,
+    preparedMicStream: null,
+    preparedTabStream: null,
     selectedQuestionUIDs: [],
   });
 

@@ -25,6 +25,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../AppContext";
 import { useLang } from "../LanguageContext";
+import { warmAudioConversion } from "../utils/audio";
 
 const QUESTION_DURATION = 120;
 const AUDIO_BARS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
@@ -35,8 +36,15 @@ const isHindiText = (text: string) => /[\u0900-\u097F]/.test(text);
 export default function InterviewScreen() {
   const { state, setState } = useApp();
   const { t, lang, toggleLang } = useLang();
-  const { questions, candidateName, department, designation, maxSwitch } =
-    state;
+  const {
+    questions,
+    candidateName,
+    department,
+    designation,
+    maxSwitch,
+    preparedMicStream,
+    preparedTabStream,
+  } = state;
 
   const [currentIdx, setCurrentIdx] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
@@ -50,12 +58,17 @@ export default function InterviewScreen() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mrKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const tabStreamRef = useRef<MediaStream | null>(null);
+  const recordStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Interval to keep Chrome speechSynthesis alive (Chrome bug: pauses after ~15s)
   const ttsKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Safety fallback timeout in case onend never fires (Hindi voices on Chrome)
   const ttsFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const audioCtxKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
   const recordingStarted = useRef(false);
   const navigating = useRef(false);
   const spokenIdxRef = useRef(-1);
@@ -87,6 +100,18 @@ export default function InterviewScreen() {
       clearTimeout(ttsFallbackRef.current);
       ttsFallbackRef.current = null;
     }
+  }, []);
+
+  const stopAudioCtxKeepAlive = useCallback(() => {
+    if (audioCtxKeepAliveRef.current) {
+      clearInterval(audioCtxKeepAliveRef.current);
+      audioCtxKeepAliveRef.current = null;
+    }
+  }, []);
+
+  const stopStream = useCallback((stream: MediaStream | null) => {
+    if (!stream) return;
+    for (const track of stream.getTracks()) track.stop();
   }, []);
 
   // --- Screen switch tracking ---
@@ -245,39 +270,110 @@ export default function InterviewScreen() {
     recordingStarted.current = true;
     (async () => {
       try {
-        const micStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            sampleRate: 16000, // Lower for upload speed
-          },
-        });
+        const hasLiveMicStream =
+          preparedMicStream &&
+          preparedMicStream.getAudioTracks().some((track) => track.readyState === "live");
+        const micStream = hasLiveMicStream
+          ? preparedMicStream
+          : await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1,
+                sampleRate: 48000,
+                sampleSize: 16,
+              },
+            });
+        const [micTrack] = micStream.getAudioTracks();
+        if (micTrack?.applyConstraints) {
+          micTrack
+            .applyConstraints({
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              channelCount: 1,
+            })
+            .catch(() => {});
+        }
         streamRef.current = micStream;
+        const hasLiveTabStream =
+          preparedTabStream &&
+          preparedTabStream.getAudioTracks().some((track) => track.readyState === "live");
+        const tabStream = hasLiveTabStream ? preparedTabStream : null;
+        tabStreamRef.current = tabStream;
 
-        // Try to set up AudioContext mixing (mic in one stream)
+        // Process mic audio to reduce rumble/noise and lift quiet voices.
         let recordStream: MediaStream = micStream;
         try {
-          const audioCtx = new AudioContext();
+          const audioCtx = new AudioContext({ sampleRate: 48000 });
           audioCtxRef.current = audioCtx;
+          if (audioCtx.state === "suspended") {
+            await audioCtx.resume().catch(() => {});
+          }
 
           const dest = audioCtx.createMediaStreamDestination();
           audioDestRef.current = dest;
 
-          // Connect mic source to mixed destination
           const micSource = audioCtx.createMediaStreamSource(micStream);
-          micSource.connect(dest);
+          const highPass = audioCtx.createBiquadFilter();
+          highPass.type = "highpass";
+          highPass.frequency.value = 80;
+          highPass.Q.value = 0.7;
 
-          // Use mixed destination stream for recording
-          // FIXED: Record from raw mic stream, NOT dest.stream
-          // AudioContext suspension (esp. during Hindi TTS) would cause dest.stream
-          // to have gaps. Raw micStream is always live regardless of AudioContext state.
-          recordStream = micStream;
+          const compressor = audioCtx.createDynamicsCompressor();
+          compressor.threshold.value = -24;
+          compressor.knee.value = 18;
+          compressor.ratio.value = 4;
+          compressor.attack.value = 0.003;
+          compressor.release.value = 0.25;
+
+          const gain = audioCtx.createGain();
+          gain.gain.value = 1.35;
+
+          micSource.connect(highPass);
+          highPass.connect(compressor);
+          compressor.connect(gain);
+          gain.connect(dest);
+
+          const tabAudioTracks = tabStream?.getAudioTracks() || [];
+          if (tabAudioTracks.length > 0) {
+            const questionAudioStream = new MediaStream(tabAudioTracks);
+            const tabSource = audioCtx.createMediaStreamSource(questionAudioStream);
+            const tabCompressor = audioCtx.createDynamicsCompressor();
+            tabCompressor.threshold.value = -20;
+            tabCompressor.knee.value = 14;
+            tabCompressor.ratio.value = 3;
+            tabCompressor.attack.value = 0.002;
+            tabCompressor.release.value = 0.2;
+
+            const tabGain = audioCtx.createGain();
+            tabGain.gain.value = 1.2;
+
+            tabSource.connect(tabCompressor);
+            tabCompressor.connect(tabGain);
+            tabGain.connect(dest);
+          } else {
+            toast.warning(
+              "Question voice ko same MP3 me lane ke liye current tab audio share karna zaroori hai.",
+            );
+          }
+
+          if (dest.stream.getAudioTracks().length > 0) {
+            recordStream = dest.stream;
+          }
+          audioCtxKeepAliveRef.current = setInterval(() => {
+            if (audioCtx.state === "suspended") {
+              audioCtx.resume().catch(() => {});
+            }
+          }, 2000);
         } catch (_) {
           // AudioContext not supported; fall back to plain mic stream
+          stopAudioCtxKeepAlive();
           audioCtxRef.current = null;
           audioDestRef.current = null;
         }
+        recordStreamRef.current = recordStream;
 
         // Choose best available mimeType
         // Prefer opus for quality, fallback webm
@@ -287,11 +383,15 @@ export default function InterviewScreen() {
             ? "audio/mp4"
             : "audio/webm";
 
-        const mr = new MediaRecorder(recordStream, { mimeType });
+        const mr = new MediaRecorder(recordStream, {
+          mimeType,
+          audioBitsPerSecond: 96000,
+        });
         mr.ondataavailable = (e) => {
           if (e.data.size > 0) chunksRef.current.push(e.data);
         };
         mr.start(250);
+        void warmAudioConversion();
         // Keep-alive: resume recorder if it somehow pauses (can happen on some browsers)
         mrKeepAliveRef.current = setInterval(() => {
           if (mediaRecorderRef.current?.state === "paused") {
@@ -315,7 +415,15 @@ export default function InterviewScreen() {
         }
       }
     })();
-  }, [t, startTimer, speakQuestion, questions]);
+  }, [
+    preparedMicStream,
+    preparedTabStream,
+    questions,
+    speakQuestion,
+    startTimer,
+    stopAudioCtxKeepAlive,
+    t,
+  ]);
 
   useEffect(() => {
     if (spokenIdxRef.current === currentIdx) return;
@@ -334,15 +442,21 @@ export default function InterviewScreen() {
       setIsSpeaking(false);
       const mr = mediaRecorderRef.current;
       const doFinish = () => {
+        stopAudioCtxKeepAlive();
         // Close AudioContext after recording stops
         audioCtxRef.current?.close().catch(() => {});
         audioCtxRef.current = null;
         audioDestRef.current = null;
+        recordStreamRef.current = null;
 
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const recordedMimeType =
+          mr?.mimeType || chunksRef.current[0]?.type || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type: recordedMimeType });
         setState({
           screen: "upload",
           recordedBlob: blob,
+          preparedMicStream: null,
+          preparedTabStream: null,
           selectedQuestionUIDs: uids,
           screenSwitchCount: sc,
         });
@@ -353,8 +467,11 @@ export default function InterviewScreen() {
       }
       if (mr && mr.state !== "inactive") {
         mr.onstop = () => {
-          if (streamRef.current)
-            for (const track of streamRef.current.getTracks()) track.stop();
+          stopStream(streamRef.current);
+          stopStream(tabStreamRef.current);
+          if (recordStreamRef.current && recordStreamRef.current !== streamRef.current) {
+            stopStream(recordStreamRef.current);
+          }
           doFinish();
         };
         mr.stop();
@@ -362,16 +479,19 @@ export default function InterviewScreen() {
         doFinish();
       }
     },
-    [setState, stopTtsKeepAlive, stopTtsFallback],
+    [setState, stopAudioCtxKeepAlive, stopStream, stopTtsKeepAlive, stopTtsFallback],
   );
 
   // Cleanup AudioContext and fallback timeout on unmount
   useEffect(() => {
     return () => {
       stopTtsFallback();
+      stopAudioCtxKeepAlive();
       audioCtxRef.current?.close().catch(() => {});
+      stopStream(streamRef.current);
+      stopStream(tabStreamRef.current);
     };
-  }, [stopTtsFallback]);
+  }, [stopAudioCtxKeepAlive, stopStream, stopTtsFallback]);
 
   const goNext = useCallback(() => {
     if (navigating.current) return;
