@@ -25,7 +25,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../AppContext";
 import { useLang } from "../LanguageContext";
-import { warmAudioConversion } from "../utils/audio";
+import { convertAudioBlobToMp3, warmAudioConversion } from "../utils/audio";
 
 const QUESTION_DURATION = 120;
 const AUDIO_BARS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
@@ -35,7 +35,7 @@ const isHindiText = (text: string) => /[\u0900-\u097F]/.test(text);
 
 export default function InterviewScreen() {
   const { state, setState } = useApp();
-  const { t, lang, toggleLang } = useLang();
+  const { t } = useLang();
   const {
     questions,
     candidateName,
@@ -188,14 +188,13 @@ export default function InterviewScreen() {
         audioCtxRef.current.resume().catch(() => {});
       }
 
-      // Build voice-assistant style announcement with question number
-      const prefix = lang === "hi" ? `प्रश्न ${idx}. ` : `Question ${idx}. `;
+      // Build voice-assistant style announcement with question number.
+      // We keep Hindi voice auto-detection only for genuinely Hindi questions.
+      const useHindi = isHindiText(text);
+      const prefix = useHindi ? `प्रश्न ${idx}. ` : `Question ${idx}. `;
       const announcement = prefix + text;
 
       const utterance = new SpeechSynthesisUtterance(announcement);
-
-      // Use Hindi voice if UI lang is Hindi OR if the question text itself contains Devanagari
-      const useHindi = lang === "hi" || isHindiText(text);
 
       // Select best available voice
       const voices = window.speechSynthesis.getVoices();
@@ -262,7 +261,7 @@ export default function InterviewScreen() {
         onDone();
       }, estimatedMs);
     },
-    [lang, stopTtsKeepAlive, stopTtsFallback],
+    [stopTtsKeepAlive, stopTtsFallback],
   );
 
   useEffect(() => {
@@ -355,7 +354,7 @@ export default function InterviewScreen() {
             tabGain.connect(dest);
           } else {
             toast.warning(
-              "Question voice ko same MP3 me lane ke liye current tab audio share karna zaroori hai.",
+              "Question voice ko stable record karne ke liye current tab audio share zaroori hai.",
             );
           }
 
@@ -441,7 +440,7 @@ export default function InterviewScreen() {
       window.speechSynthesis?.cancel();
       setIsSpeaking(false);
       const mr = mediaRecorderRef.current;
-      const doFinish = () => {
+      const doFinish = async () => {
         stopAudioCtxKeepAlive();
         // Close AudioContext after recording stops
         audioCtxRef.current?.close().catch(() => {});
@@ -451,10 +450,21 @@ export default function InterviewScreen() {
 
         const recordedMimeType =
           mr?.mimeType || chunksRef.current[0]?.type || "audio/webm";
-        const blob = new Blob(chunksRef.current, { type: recordedMimeType });
+        const rawBlob = new Blob(chunksRef.current, { type: recordedMimeType });
+        let finalBlob = rawBlob;
+        if (rawBlob.size > 0) {
+          try {
+            finalBlob = await convertAudioBlobToMp3(rawBlob);
+          } catch (error) {
+            console.warn("MP3 conversion failed, using original recording blob.", error);
+            toast.warning(
+              "MP3 conversion complete nahi ho saki. Upload ke liye original recording use hogi.",
+            );
+          }
+        }
         setState({
           screen: "upload",
-          recordedBlob: blob,
+          recordedBlob: finalBlob,
           preparedMicStream: null,
           preparedTabStream: null,
           selectedQuestionUIDs: uids,
@@ -472,11 +482,11 @@ export default function InterviewScreen() {
           if (recordStreamRef.current && recordStreamRef.current !== streamRef.current) {
             stopStream(recordStreamRef.current);
           }
-          doFinish();
+          void doFinish();
         };
         mr.stop();
       } else {
-        doFinish();
+        void doFinish();
       }
     },
     [setState, stopAudioCtxKeepAlive, stopStream, stopTtsKeepAlive, stopTtsFallback],
@@ -594,15 +604,6 @@ export default function InterviewScreen() {
             </span>
           </div>
 
-          {/* Language toggle */}
-          <button
-            type="button"
-            onClick={toggleLang}
-            className="text-xs font-semibold px-2 sm:px-2.5 py-1 rounded-full bg-white border border-border text-brand-blue hover:bg-secondary transition-colors"
-          >
-            {lang === "en" ? "हिं" : "EN"}
-          </button>
-
           {/* Finish button */}
           <Button
             size="sm"
@@ -663,9 +664,7 @@ export default function InterviewScreen() {
             {isSpeaking ? (
               <div className="flex items-center gap-1.5 text-brand-blue flex-shrink-0">
                 <Volume2 className="w-3.5 h-3.5 animate-pulse" />
-                <span className="text-xs font-semibold">
-                  {lang === "hi" ? "सुनें..." : "Listening..."}
-                </span>
+                <span className="text-xs font-semibold">Listening...</span>
               </div>
             ) : (
               <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -722,15 +721,11 @@ export default function InterviewScreen() {
                   <div className="flex items-center gap-2 mb-2">
                     <Volume2 className="w-4 h-4 text-brand-blue animate-pulse" />
                     <span className="text-sm font-medium text-brand-blue">
-                      {lang === "hi"
-                        ? "प्रश्न पढ़ा जा रहा है..."
-                        : "Reading question aloud..."}
+                      Reading question aloud...
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground text-center">
-                    {lang === "hi"
-                      ? "माइक्रोफोन चालू है — आपकी आवाज़ रिकॉर्ड हो रही है"
-                      : "Mic is live — your audio is being recorded"}
+                    Mic is live — your audio is being recorded
                   </p>
                 </>
               ) : (

@@ -22,6 +22,8 @@ export default function IntroScreen() {
     if (!agreed) return;
     setRequestingMic(true);
     try {
+      const supportsTabAudioShare =
+        typeof navigator.mediaDevices.getDisplayMedia === "function";
       const micPromise = navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -34,9 +36,9 @@ export default function IntroScreen() {
       });
 
       let displayPromise: Promise<MediaStream | null> = Promise.resolve(null);
-      if (typeof navigator.mediaDevices.getDisplayMedia === "function") {
+      if (supportsTabAudioShare) {
         toast.warning(
-          "Question voice ko bhi record karne ke liye 'This Tab' aur 'Share tab audio' select kijiye.",
+          "Question voice ko stable record karne ke liye 'This Tab' aur 'Share tab audio' zaroor select kijiye.",
         );
         displayPromise = navigator.mediaDevices
           .getDisplayMedia({
@@ -66,14 +68,22 @@ export default function IntroScreen() {
       const micStream = micResult.value;
       const displayStream =
         displayResult.status === "fulfilled" ? displayResult.value : null;
+      const hasSharedTabAudio = !!displayStream
+        ?.getAudioTracks()
+        .some((track) => track.readyState === "live");
 
-      if (displayStream && displayStream.getAudioTracks().length === 0) {
-        toast.warning(
-          "Tab audio share nahi hua. Final recording me question voice shayad na aaye.",
+      if (supportsTabAudioShare && !hasSharedTabAudio) {
+        stopStream(micStream);
+        stopStream(displayStream);
+        toast.error(
+          "Question voice ko device volume se bachane ke liye 'This Tab' aur 'Share tab audio' ke saath dobara start kijiye.",
         );
-      } else if (!displayStream) {
+        return;
+      }
+
+      if (!supportsTabAudioShare) {
         toast.warning(
-          "Tab audio skip hua. Final recording mic-only fallback use karegi.",
+          "Is browser/device me tab audio share available nahi hai. Question voice recording device volume se affect ho sakti hai.",
         );
       }
 

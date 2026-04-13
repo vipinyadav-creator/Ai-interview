@@ -1,23 +1,15 @@
-import { type ReactNode, createContext, useContext, useState } from "react";
-import { type Lang, translations } from "./i18n";
+import { type ReactNode, createContext, useContext } from "react";
+import { translations } from "./i18n";
 
 interface LangContextType {
-  lang: Lang;
   t: (typeof translations)["en"];
-  toggleLang: () => void;
 }
 
 const LangContext = createContext<LangContextType | null>(null);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [lang] = useState<Lang>("en");
-
-  const toggleLang = () => {
-    // Language toggle disabled; always English
-  };
-
   return (
-    <LangContext.Provider value={{ lang, t: translations[lang], toggleLang }}>
+    <LangContext.Provider value={{ t: translations.en }}>
       {children}
     </LangContext.Provider>
   );
