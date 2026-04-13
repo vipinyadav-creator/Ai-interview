@@ -12,14 +12,15 @@
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "baseUrl": ".",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
     "types": ["vite/client", "node"],
     "paths": {
-      "declarations/*": ["../declarations/*"],
-      "@/*": ["./src/*"]
+      "declarations/*": ["src/declarations/*"],
+      "@/*": ["src/*"]
     }
   },
   "include": ["src"],

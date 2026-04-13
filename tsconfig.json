@@ -6,6 +6,9 @@
     "strictPropertyInitialization": false,
     "moduleResolution": "node",
     "allowJs": true,
-    "outDir": "HACK_BECAUSE_OF_ALLOW_JS"
-  }
+    "checkJs": false,
+    "noEmit": true
+  },
+  "include": ["scripts/**/*.js"],
+  "exclude": ["node_modules", "src/frontend", "assets", "HACK_BECAUSE_OF_ALLOW_JS"]
 }
