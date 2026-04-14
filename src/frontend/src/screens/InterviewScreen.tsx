@@ -196,28 +196,41 @@ export default function InterviewScreen() {
 
       const utterance = new SpeechSynthesisUtterance(announcement);
 
-      // Select best available voice
-      const voices = window.speechSynthesis.getVoices();
-      if (useHindi) {
-        const hiVoice = voices.find(
-          (v) => v.lang.startsWith("hi-IN") || v.lang.startsWith("hi"),
-        );
-        if (hiVoice) utterance.voice = hiVoice;
-        utterance.lang = "hi-IN";
-      } else {
-        const enVoice =
-          voices.find((v) => v.lang === "en-IN") ||
-          voices.find((v) => v.lang.startsWith("en-GB")) ||
-          voices.find((v) => v.lang.startsWith("en-US")) ||
-          voices.find((v) => v.lang.startsWith("en"));
-        if (enVoice) utterance.voice = enVoice;
-        utterance.lang = "en-IN";
-      }
+      // ==========================================
+      // UPDATED LOGIC: Clear Indian Voice Selection
+      // ==========================================
+      const setBestVoice = () => {
+        const voices = window.speechSynthesis.getVoices();
+        
+        if (useHindi) {
+          const hiVoice = voices.find(v => v.name.includes("Google") && v.lang.includes("hi")) || 
+                          voices.find(v => v.lang.includes("hi-IN"));
+          if (hiVoice) utterance.voice = hiVoice;
+          utterance.lang = "hi-IN";
+        } else {
+          // STRICTLY Indian English (Avoids US/UK foreign accents)
+          const enInVoice = voices.find(v => v.name.includes("Google") && v.lang === "en-IN") || 
+                            voices.find(v => v.lang === "en-IN") || 
+                            voices.find(v => v.name.includes("India"));
+          if (enInVoice) utterance.voice = enInVoice;
+          utterance.lang = "en-IN";
+        }
+        
+        // Slightly slower rate for clearer Indian pronunciation
+        utterance.rate = 0.9; 
+        utterance.pitch = 1.0;
+        utterance.volume = 1;
 
-      // Speech rate 1.0 — normal human-like speed
-      utterance.rate = 1.0;
-      utterance.pitch = 1.0;
-      utterance.volume = 1;
+        window.speechSynthesis.speak(utterance);
+      };
+
+      // Handle browser voice loading delay
+      if (window.speechSynthesis.getVoices().length === 0) {
+        window.speechSynthesis.onvoiceschanged = setBestVoice;
+      } else {
+        setBestVoice();
+      }
+      // ==========================================
 
       utterance.onend = () => {
         stopTtsKeepAlive();
@@ -233,7 +246,6 @@ export default function InterviewScreen() {
       };
 
       setIsSpeaking(true);
-      window.speechSynthesis.speak(utterance);
 
       // Chrome bug fix: speechSynthesis silently pauses after ~15 seconds.
       // Only call resume() — do NOT pause() first, as pause()+resume() breaks
