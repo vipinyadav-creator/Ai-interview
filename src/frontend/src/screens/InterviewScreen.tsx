@@ -30,12 +30,9 @@ import { convertAudioBlobToMp3, warmAudioConversion } from "../utils/audio";
 const QUESTION_DURATION = 120;
 const AUDIO_BARS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
-// Detect if text contains Devanagari (Hindi) characters
-const isHindiText = (text: string) => /[\u0900-\u097F]/.test(text);
-
 export default function InterviewScreen() {
   const { state, setState } = useApp();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const {
     questions,
     candidateName,
@@ -43,7 +40,6 @@ export default function InterviewScreen() {
     designation,
     maxSwitch,
     preparedMicStream,
-    preparedTabStream,
   } = state;
 
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -58,27 +54,18 @@ export default function InterviewScreen() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mrKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const tabStreamRef = useRef<MediaStream | null>(null);
-  const recordStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Interval to keep Chrome speechSynthesis alive (Chrome bug: pauses after ~15s)
   const ttsKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Safety fallback timeout in case onend never fires (Hindi voices on Chrome)
   const ttsFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const audioCtxKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
-  );
   const recordingStarted = useRef(false);
   const navigating = useRef(false);
   const spokenIdxRef = useRef(-1);
   const goNextRef = useRef<() => void>(() => {});
   // Debounce ref for screen switch tracking — prevents double-counting
   const lastSwitchTime = useRef(0);
-
-  // AudioContext refs for mixing mic into one stream
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const audioDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
 
   const totalQuestions = questions.length;
   const currentQuestion = questions[currentIdx];
@@ -102,13 +89,6 @@ export default function InterviewScreen() {
     }
   }, []);
 
-  const stopAudioCtxKeepAlive = useCallback(() => {
-    if (audioCtxKeepAliveRef.current) {
-      clearInterval(audioCtxKeepAliveRef.current);
-      audioCtxKeepAliveRef.current = null;
-    }
-  }, []);
-
   const stopStream = useCallback((stream: MediaStream | null) => {
     if (!stream) return;
     for (const track of stream.getTracks()) track.stop();
@@ -118,43 +98,35 @@ export default function InterviewScreen() {
   // Bug fix: debounce within 500ms so visibilitychange + blur firing together
   // only counts as ONE switch. Also only count visibilitychange when hiding.
   useEffect(() => {
+    const handleSwitch = () => {
+      const now = Date.now();
+      if (now - lastSwitchTime.current < 500) return; // debounce
+      lastSwitchTime.current = now;
+      setSwitchCount((c) => {
+        const next = c + 1;
+        if (next >= maxSwitch) {
+          setShowForcedQuit(true);
+        } else {
+          const remaining = maxSwitch - next;
+          // Assuming a translation key like `switchWarning: (count) => `${count} switches left...`` exists
+          toast.warning(t.switchWarning(remaining));
+        }
+        return next;
+      });
+    };
     const onHide = () => {
       // Only count when tab goes hidden, not when it comes back
-      if (!document.hidden) return;
-      const now = Date.now();
-      if (now - lastSwitchTime.current < 500) return; // debounce
-      lastSwitchTime.current = now;
-      setSwitchCount((c) => {
-        const next = c + 1;
-        const remaining = maxSwitch - next;
-        toast.warning(
-          `${remaining} switches left. Interview will end after that.`,
-        );
-        if (next >= maxSwitch) setShowForcedQuit(true);
-        return next;
-      });
-    };
-    const onBlur = () => {
-      const now = Date.now();
-      if (now - lastSwitchTime.current < 500) return; // debounce
-      lastSwitchTime.current = now;
-      setSwitchCount((c) => {
-        const next = c + 1;
-        const remaining = maxSwitch - next;
-        toast.warning(
-          `${remaining} switches left. Interview will end after that.`,
-        );
-        if (next >= maxSwitch) setShowForcedQuit(true);
-        return next;
-      });
+      if (document.hidden) {
+        handleSwitch();
+      }
     };
     document.addEventListener("visibilitychange", onHide);
-    window.addEventListener("blur", onBlur);
+    window.addEventListener("blur", handleSwitch);
     return () => {
       document.removeEventListener("visibilitychange", onHide);
-      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("blur", handleSwitch);
     };
-  }, [maxSwitch]);
+  }, [maxSwitch, t]);
 
   const startTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -182,40 +154,36 @@ export default function InterviewScreen() {
       stopTtsKeepAlive();
       stopTtsFallback();
 
-      // Resume AudioContext to ensure mic audio keeps flowing (fixes Hindi recording)
-      // Await AudioContext resume before TTS to ensure it is running
-      if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
-        audioCtxRef.current.resume().catch(() => {});
-      }
-
       // Build voice-assistant style announcement with question number.
-      // We keep Hindi voice auto-detection only for genuinely Hindi questions.
-      const useHindi = isHindiText(text);
-      const prefix = useHindi ? `प्रश्न ${idx}. ` : `Question ${idx}. `;
+      const prefix = `Question ${idx}. `;
       const announcement = prefix + text;
 
       const utterance = new SpeechSynthesisUtterance(announcement);
 
-      // ==========================================
-      // UPDATED LOGIC: Clear Indian Voice Selection
-      // ==========================================
       const setBestVoice = () => {
         const voices = window.speechSynthesis.getVoices();
-        
-        if (useHindi) {
-          const hiVoice = voices.find(v => v.name.includes("Google") && v.lang.includes("hi")) || 
-                          voices.find(v => v.lang.includes("hi-IN"));
-          if (hiVoice) utterance.voice = hiVoice;
+        let bestVoice = null;
+
+        if (lang === "hi") {
+          // Prioritize high-quality Hindi voices
+          bestVoice =
+            voices.find((v) => v.name.includes("Google") && v.lang === "hi-IN") ||
+            voices.find(
+              (v) => v.name.includes("Microsoft") && v.lang === "hi-IN",
+            ) ||
+            voices.find((v) => v.lang === "hi-IN");
           utterance.lang = "hi-IN";
         } else {
-          // STRICTLY Indian English (Avoids US/UK foreign accents)
-          const enInVoice = voices.find(v => v.name.includes("Google") && v.lang === "en-IN") || 
-                            voices.find(v => v.lang === "en-IN") || 
-                            voices.find(v => v.name.includes("India"));
-          if (enInVoice) utterance.voice = enInVoice;
+          // Default to English, prioritizing Indian English
+          bestVoice =
+            voices.find((v) => v.name.includes("Google") && v.lang === "en-IN") ||
+            voices.find(
+              (v) => v.name.includes("Microsoft") && v.lang === "en-IN",
+            ) ||
+            voices.find((v) => v.lang === "en-IN");
           utterance.lang = "en-IN";
         }
-        
+        if (bestVoice) utterance.voice = bestVoice;
         // Slightly slower rate for clearer Indian pronunciation
         utterance.rate = 0.9; 
         utterance.pitch = 1.0;
@@ -273,7 +241,7 @@ export default function InterviewScreen() {
         onDone();
       }, estimatedMs);
     },
-    [stopTtsKeepAlive, stopTtsFallback],
+    [stopTtsKeepAlive, stopTtsFallback, lang],
   );
 
   useEffect(() => {
@@ -308,83 +276,8 @@ export default function InterviewScreen() {
             .catch(() => {});
         }
         streamRef.current = micStream;
-        const hasLiveTabStream =
-          preparedTabStream &&
-          preparedTabStream.getAudioTracks().some((track) => track.readyState === "live");
-        const tabStream = hasLiveTabStream ? preparedTabStream : null;
-        tabStreamRef.current = tabStream;
 
-        // Process mic audio to reduce rumble/noise and lift quiet voices.
-        let recordStream: MediaStream = micStream;
-        try {
-          const audioCtx = new AudioContext({ sampleRate: 48000 });
-          audioCtxRef.current = audioCtx;
-          if (audioCtx.state === "suspended") {
-            await audioCtx.resume().catch(() => {});
-          }
-
-          const dest = audioCtx.createMediaStreamDestination();
-          audioDestRef.current = dest;
-
-          const micSource = audioCtx.createMediaStreamSource(micStream);
-          const highPass = audioCtx.createBiquadFilter();
-          highPass.type = "highpass";
-          highPass.frequency.value = 80;
-          highPass.Q.value = 0.7;
-
-          const compressor = audioCtx.createDynamicsCompressor();
-          compressor.threshold.value = -24;
-          compressor.knee.value = 18;
-          compressor.ratio.value = 4;
-          compressor.attack.value = 0.003;
-          compressor.release.value = 0.25;
-
-          const gain = audioCtx.createGain();
-          gain.gain.value = 1.35;
-
-          micSource.connect(highPass);
-          highPass.connect(compressor);
-          compressor.connect(gain);
-          gain.connect(dest);
-
-          const tabAudioTracks = tabStream?.getAudioTracks() || [];
-          if (tabAudioTracks.length > 0) {
-            const questionAudioStream = new MediaStream(tabAudioTracks);
-            const tabSource = audioCtx.createMediaStreamSource(questionAudioStream);
-            const tabCompressor = audioCtx.createDynamicsCompressor();
-            tabCompressor.threshold.value = -20;
-            tabCompressor.knee.value = 14;
-            tabCompressor.ratio.value = 3;
-            tabCompressor.attack.value = 0.002;
-            tabCompressor.release.value = 0.2;
-
-            const tabGain = audioCtx.createGain();
-            tabGain.gain.value = 1.2;
-
-            tabSource.connect(tabCompressor);
-            tabCompressor.connect(tabGain);
-            tabGain.connect(dest);
-          } else {
-            toast.warning(
-              "Question voice ko stable record karne ke liye current tab audio share zaroori hai.",
-            );
-          }
-
-          if (dest.stream.getAudioTracks().length > 0) {
-            recordStream = dest.stream;
-          }
-          audioCtxKeepAliveRef.current = setInterval(() => {
-            if (audioCtx.state === "suspended") {
-              audioCtx.resume().catch(() => {});
-            }
-          }, 2000);
-        } catch (_) {
-          // AudioContext not supported; fall back to plain mic stream
-          stopAudioCtxKeepAlive();
-          audioCtxRef.current = null;
-          audioDestRef.current = null;
-        }
-        recordStreamRef.current = recordStream;
+        const recordStream = micStream;
 
         // Choose best available mimeType
         // Prefer opus for quality, fallback webm
@@ -428,11 +321,9 @@ export default function InterviewScreen() {
     })();
   }, [
     preparedMicStream,
-    preparedTabStream,
     questions,
     speakQuestion,
     startTimer,
-    stopAudioCtxKeepAlive,
     t,
   ]);
 
@@ -442,7 +333,7 @@ export default function InterviewScreen() {
     speakQuestion(questions[currentIdx]?.question || "", currentIdx + 1, () =>
       startTimer(),
     );
-  }, [currentIdx, speakQuestion, startTimer, questions]);
+  }, [currentIdx, speakQuestion, startTimer, questions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const finishInterview = useCallback(
     (uids: string[], sc: number) => {
@@ -453,13 +344,6 @@ export default function InterviewScreen() {
       setIsSpeaking(false);
       const mr = mediaRecorderRef.current;
       const doFinish = async () => {
-        stopAudioCtxKeepAlive();
-        // Close AudioContext after recording stops
-        audioCtxRef.current?.close().catch(() => {});
-        audioCtxRef.current = null;
-        audioDestRef.current = null;
-        recordStreamRef.current = null;
-
         const recordedMimeType =
           mr?.mimeType || chunksRef.current[0]?.type || "audio/webm";
         const rawBlob = new Blob(chunksRef.current, { type: recordedMimeType });
@@ -478,7 +362,6 @@ export default function InterviewScreen() {
           screen: "upload",
           recordedBlob: finalBlob,
           preparedMicStream: null,
-          preparedTabStream: null,
           selectedQuestionUIDs: uids,
           screenSwitchCount: sc,
         });
@@ -490,10 +373,6 @@ export default function InterviewScreen() {
       if (mr && mr.state !== "inactive") {
         mr.onstop = () => {
           stopStream(streamRef.current);
-          stopStream(tabStreamRef.current);
-          if (recordStreamRef.current && recordStreamRef.current !== streamRef.current) {
-            stopStream(recordStreamRef.current);
-          }
           void doFinish();
         };
         mr.stop();
@@ -501,19 +380,16 @@ export default function InterviewScreen() {
         void doFinish();
       }
     },
-    [setState, stopAudioCtxKeepAlive, stopStream, stopTtsKeepAlive, stopTtsFallback],
+    [setState, stopStream, stopTtsKeepAlive, stopTtsFallback],
   );
 
-  // Cleanup AudioContext and fallback timeout on unmount
+  // Cleanup fallback timeout on unmount
   useEffect(() => {
     return () => {
       stopTtsFallback();
-      stopAudioCtxKeepAlive();
-      audioCtxRef.current?.close().catch(() => {});
       stopStream(streamRef.current);
-      stopStream(tabStreamRef.current);
     };
-  }, [stopAudioCtxKeepAlive, stopStream, stopTtsFallback]);
+  }, [stopStream, stopTtsFallback]);
 
   const goNext = useCallback(() => {
     if (navigating.current) return;
@@ -642,8 +518,7 @@ export default function InterviewScreen() {
         <div className="mx-3 sm:mx-4 mt-3 bg-status-amber/10 border border-status-amber/25 rounded-xl px-3 sm:px-4 py-3 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 text-status-amber flex-shrink-0" />
           <p className="text-xs sm:text-sm text-status-amber">
-            Careful! {switchCount}/{maxSwitch} switches used.{" "}
-            {maxSwitch - switchCount} left before auto-submit.
+            {t.switchWarningBanner(switchCount, maxSwitch)}
           </p>
         </div>
       )}

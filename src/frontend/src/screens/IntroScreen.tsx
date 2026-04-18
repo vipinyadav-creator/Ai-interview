@@ -9,22 +9,15 @@ import { useLang } from "../LanguageContext";
 
 export default function IntroScreen() {
   const { state, setState } = useApp();
-  const { t } = useLang();
+  const { t, lang, toggleLang } = useLang();
   const [agreed, setAgreed] = useState(false);
   const [requestingMic, setRequestingMic] = useState(false);
-
-  const stopStream = (stream: MediaStream | null) => {
-    if (!stream) return;
-    for (const track of stream.getTracks()) track.stop();
-  };
 
   const handleStart = async () => {
     if (!agreed) return;
     setRequestingMic(true);
     try {
-      const supportsTabAudioShare =
-        typeof navigator.mediaDevices.getDisplayMedia === "function";
-      const micPromise = navigator.mediaDevices.getUserMedia({
+      const micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -35,62 +28,9 @@ export default function IntroScreen() {
         },
       });
 
-      let displayPromise: Promise<MediaStream | null> = Promise.resolve(null);
-      if (supportsTabAudioShare) {
-        toast.warning(
-          "Question voice ko stable record karne ke liye 'This Tab' aur 'Share tab audio' zaroor select kijiye.",
-        );
-        displayPromise = navigator.mediaDevices
-          .getDisplayMedia({
-            video: true,
-            audio: true,
-            preferCurrentTab: true,
-            selfBrowserSurface: "include",
-            surfaceSwitching: "exclude",
-            systemAudio: "include",
-          } as never)
-          .then((stream) => stream)
-          .catch(() => null);
-      }
-
-      const [micResult, displayResult] = await Promise.allSettled([
-        micPromise,
-        displayPromise,
-      ]);
-
-      if (micResult.status !== "fulfilled") {
-        if (displayResult.status === "fulfilled") {
-          stopStream(displayResult.value);
-        }
-        throw micResult.reason;
-      }
-
-      const micStream = micResult.value;
-      const displayStream =
-        displayResult.status === "fulfilled" ? displayResult.value : null;
-      const hasSharedTabAudio = !!displayStream
-        ?.getAudioTracks()
-        .some((track) => track.readyState === "live");
-
-      if (supportsTabAudioShare && !hasSharedTabAudio) {
-        stopStream(micStream);
-        stopStream(displayStream);
-        toast.error(
-          "Question voice ko device volume se bachane ke liye 'This Tab' aur 'Share tab audio' ke saath dobara start kijiye.",
-        );
-        return;
-      }
-
-      if (!supportsTabAudioShare) {
-        toast.warning(
-          "Is browser/device me tab audio share available nahi hai. Question voice recording device volume se affect ho sakti hai.",
-        );
-      }
-
       setState({
         screen: "interview",
         preparedMicStream: micStream,
-        preparedTabStream: displayStream,
       });
     } catch {
       toast.error(t.micPermissionError);
@@ -115,6 +55,13 @@ export default function IntroScreen() {
           <Badge className="bg-status-amber/15 text-status-amber border-status-amber/30 text-xs">
             {state.questions.length} {t.questionsLabel}
           </Badge>
+          <button
+            type="button"
+            onClick={toggleLang}
+            className="text-xs font-semibold px-2.5 sm:px-3 py-1.5 rounded-full bg-white border border-border text-brand-blue hover:bg-secondary transition-colors shadow-sm"
+          >
+            {lang === "en" ? "हिं" : "EN"}
+          </button>
         </div>
       </header>
 
@@ -158,7 +105,7 @@ export default function IntroScreen() {
                   <p className="text-xs text-muted-foreground">
                     {t.designation}
                   </p>
-                  <p className="text-sm font-semibold text-foreground truncate w-full break-words">
+                  <p className="text-sm font-semibold text-foreground truncate">
                     {state.designation}
                   </p>
                 </div>
