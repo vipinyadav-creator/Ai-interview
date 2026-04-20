@@ -7,13 +7,27 @@ let ffmpegLoadPromise: Promise<void> | null = null;
 async function ensureFfmpegLoaded(): Promise<void> {
   if (ffmpeg.loaded) return;
   if (!ffmpegLoadPromise) {
-    ffmpegLoadPromise = ffmpeg.load().then(() => {});
+    // Timeout added for mobile safety
+    ffmpegLoadPromise = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("FFmpeg load timeout")), 15000);
+      ffmpeg.load().then(() => {
+        clearTimeout(timeout);
+        resolve();
+      }).catch(err => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+    });
   }
   await ffmpegLoadPromise;
 }
 
 export async function warmAudioConversion(): Promise<void> {
-  await ensureFfmpegLoaded();
+  try {
+    await ensureFfmpegLoaded();
+  } catch (error) {
+    console.warn("Warming FFmpeg failed, but will retry during conversion.");
+  }
 }
 
 function getAudioExtension(mimeType: string): string {
@@ -40,54 +54,58 @@ export async function convertAudioBlobToMp3(audioBlob: Blob): Promise<Blob> {
     return audioBlob;
   }
 
-  await ensureFfmpegLoaded();
-
-  // Use simple file names inside ffmpeg FS.
-  const inputName = `input.${getAudioExtension(audioBlob.type)}`;
-  const outputName = "output.mp3";
-
-  // Convert Blob -> Uint8Array for ffmpeg FS.
-  const inputData = new Uint8Array(await audioBlob.arrayBuffer());
-  await ffmpeg.writeFile(inputName, inputData);
+  const originalMime = audioBlob.type || "audio/webm";
+  const extension = getAudioExtension(originalMime);
 
   try {
-    // Voice-focused MP3 output: predictable size, quick encode, clear speech.
-    await ffmpeg.exec([
-      "-i",
-      inputName,
-      "-vn",
-      "-ac",
-      "1",
-      "-ar",
-      "44100",
-      "-acodec",
-      "libmp3lame",
-      "-b:a",
-      "96k",
-      outputName,
-    ]);
+    await ensureFfmpegLoaded();
 
-    const mp3Data = await ffmpeg.readFile(outputName);
-    if (mp3Data instanceof Uint8Array) {
-      const mp3Bytes = new Uint8Array(mp3Data.byteLength);
-      mp3Bytes.set(mp3Data);
-      return new Blob([mp3Bytes.buffer], { type: "audio/mpeg" });
-    }
+    // Use simple file names inside ffmpeg FS.
+    const inputName = `input.${extension}`;
+    const outputName = "output.mp3";
 
-    // Fallback if string encoding is returned (shouldn't happen).
-    return new Blob([String(mp3Data)], { type: "audio/mpeg" });
-  } finally {
-    // Cleanup FS to avoid growing memory between conversions.
+    // Convert Blob -> Uint8Array for ffmpeg FS.
+    const inputData = new Uint8Array(await audioBlob.arrayBuffer());
+    await ffmpeg.writeFile(inputName, inputData);
+
     try {
-      await ffmpeg.deleteFile(inputName);
-    } catch {
-      // ignore
+      // Voice-focused MP3 output + Mobile RAM Optimized
+      await ffmpeg.exec([
+        "-i", inputName,
+        "-vn",          // No video
+        "-ac", "1",     // Mono channel (saves memory)
+        "-ar", "22050", // 22050 Hz (good for voice, saves memory)
+        "-acodec", "libmp3lame",
+        "-b:a", "48k",  // 48kbps bitrate (lightweight)
+        outputName,
+      ]);
+
+      const mp3Data = await ffmpeg.readFile(outputName);
+      if (mp3Data instanceof Uint8Array) {
+        const mp3Bytes = new Uint8Array(mp3Data.byteLength);
+        mp3Bytes.set(mp3Data);
+        return new Blob([mp3Bytes.buffer], { type: "audio/mpeg" });
+      }
+
+      // Fallback if string encoding is returned (shouldn't happen).
+      return new Blob([String(mp3Data)], { type: "audio/mpeg" });
+    } finally {
+      // Cleanup FS to avoid growing memory between conversions.
+      try {
+        await ffmpeg.deleteFile(inputName);
+      } catch {
+        // ignore
+      }
+      try {
+        await ffmpeg.deleteFile(outputName);
+      } catch {
+        // ignore
+      }
     }
-    try {
-      await ffmpeg.deleteFile(outputName);
-    } catch {
-      // ignore
-    }
+  } catch (error) {
+    console.error("MP3 Conversion failed (Normal on mobile). Returning original blob.", error);
+    // Return raw audio if conversion fails so the interview isn't lost
+    return audioBlob;
   }
 }
 

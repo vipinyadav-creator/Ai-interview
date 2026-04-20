@@ -1,5 +1,6 @@
 import { Progress } from "@/components/ui/progress";
 import {
+  AlertTriangle,
   BrainCircuit,
   CheckCircle2,
   FileAudio,
@@ -17,7 +18,6 @@ import {
   uploadChunk,
 } from "../api";
 import { convertAudioBlobToMp3 } from "../utils/audio";
-// import { useBackend } from "../hooks/useActor"; // Streaming later
 
 const CHUNK_SIZE = 512 * 1024; // 512 KB
 
@@ -63,7 +63,9 @@ export default function UploadScreen() {
       const audioBlob = await convertAudioBlobToMp3(blob);
       setProgress(15);
 
+      // FORCE MP3 FILENAME AND MIME TYPE
       const fileName = `${state.candidateName.replace(/\s+/g, "_")}_${state.interviewId}.mp3`;
+      const actualMimeType = "audio/mpeg";
 
       try {
         const driveRes = await uploadAudioToDrive(
@@ -207,7 +209,7 @@ export default function UploadScreen() {
             </div>
           ) : (
             <div data-ocid="upload.loading_state">
-              <div className="flex items-center gap-3 mb-6">
+              <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-xl bg-brand-blue/10 flex items-center justify-center flex-shrink-0">
                   <Upload className="w-5 h-5 text-brand-blue" />
                 </div>
@@ -219,6 +221,14 @@ export default function UploadScreen() {
                     {state.candidateName}
                   </p>
                 </div>
+              </div>
+
+              {/* ✨ IMPORTANT WARNING BOX FOR CANDIDATES ✨ */}
+              <div className="bg-status-amber/10 border border-status-amber/30 rounded-lg p-3 mb-6 flex gap-3 items-center">
+                <AlertTriangle className="w-5 h-5 text-status-amber flex-shrink-0" />
+                <p className="text-xs font-semibold text-status-amber">
+                  IMPORTANT: Please do not close or minimize this tab until the upload is complete to avoid losing your interview.
+                </p>
               </div>
 
               <div className="mb-2 flex justify-between items-center">
