@@ -1,0 +1,21 @@
+function ttsSynthesize(text, lang = 'en-US') {
+  try {
+    // Google Translate TTS hack - reliable and free
+    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang === 'hi-IN' ? 'hi' : 'en'}&client=tw-ob&q=${encodeURIComponent(text)}`;
+    
+    const response = UrlFetchApp.fetch(ttsUrl, { muteHttpExceptions: true });
+    
+    if (response.getResponseCode() === 200) {
+      const audioBlob = response.getBlob();
+      const audioBytes = audioBlob.getBytes();
+      const audioBase64 = Utilities.base64Encode(audioBytes);
+      
+      return { success: true, audioBase64 };
+    }
+    
+    throw new Error('TTS API failed: ' + response.getContentText());
+    
+  } catch (err) {
+    return { success: false, message: err.toString(), audioBase64: '' };
+  }
+}

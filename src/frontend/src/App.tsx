@@ -1,6 +1,6 @@
-import React, { Suspense } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { AnimatePresence, motion } from "motion/react";
+import React, { Suspense } from "react";
 import { AppProvider, useApp } from "./AppContext";
 import { LanguageProvider } from "./LanguageContext";
 const InterviewScreen = React.lazy(() => import("./screens/InterviewScreen"));

@@ -1,4 +1,5 @@
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzzl0QBIWy-_MUmXDcaWRsGGGkv4Z5HUKXkosVZO5_7ErTBINjutlGHwZdv8Cmhvjenxg/exec";
+const APPS_SCRIPT_URL =
+  "https://script.google.com/macros/s/AKfycbzzl0QBIWy-_MUmXDcaWRsGGGkv4Z5HUKXkosVZO5_7ErTBINjutlGHwZdv8Cmhvjenxg/exec";
 
 export interface Question {
   uid: string;
@@ -22,7 +23,7 @@ async function post<T>(
 ): Promise<T> {
   const res = await fetch(APPS_SCRIPT_URL, {
     method: "POST",
-    headers: { "Content-Type": "text/plain" }, 
+    headers: { "Content-Type": "text/plain" },
     body: JSON.stringify({ action, ...params }),
     redirect: "follow",
   });
@@ -90,7 +91,11 @@ export async function ttsSynthesize(
   text: string,
   lang: string,
 ): Promise<{ audioBase64: string }> {
-  const res = await post<{ success: boolean; audioBase64: string; message?: string }>("tts", { text, lang });
+  const res = await post<{
+    success: boolean;
+    audioBase64: string;
+    message?: string;
+  }>("tts", { text, lang });
   if (!res.success) {
     throw new Error(res.message || "TTS synthesis failed");
   }

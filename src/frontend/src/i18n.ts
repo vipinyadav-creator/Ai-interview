@@ -4,7 +4,8 @@ export const translations = {
   en: {
     brandName: "Rawalwasia AI",
     candidateVerification: "Candidate Verification",
-    enterEmailDesc: "Enter your registered email to receive a one-time password",
+    enterEmailDesc:
+      "Enter your registered email to receive a one-time password",
     emailAddress: "Email Address",
     emailPlaceholder: "your@email.com",
     sendOtp: "Send OTP",
@@ -22,7 +23,8 @@ export const translations = {
     department: "Department",
     designation: "Designation",
     interviewGuidelines: "Interview Guidelines",
-    consentText: "I have read and agree to the interview rules and consent to audio recording of this session.",
+    consentText:
+      "I have read and agree to the interview rules and consent to audio recording of this session.",
     startInterview: "Start Interview",
     requestingMic: "Requesting mic access...",
     rules: [
@@ -42,28 +44,33 @@ export const translations = {
     skipQuestion: "Skip Question",
     nextQuestion: "Next Question",
     finish: "Finish",
-    
+
     // 👇 YAHAN CHANGES KIYE GAYE HAIN 👇
-    tabSwitchWarning: (remaining: number) => `Warning: You have switched tabs. ${remaining} switches remaining!`,
-    switchWarningBanner: (count: number, max: number) => `Warning: You have switched tabs/windows ${count} times. Exceeding ${max} will auto-submit your interview.`,
+    tabSwitchWarning: (remaining: number) =>
+      `Warning: You have switched tabs. ${remaining} switches remaining!`,
+    switchWarningBanner: (count: number, max: number) =>
+      `Warning: You have switched tabs/windows ${count} times. Exceeding ${max} will auto-submit your interview.`,
     // 👆 ============================= 👆
 
     question: "Question",
     of: "of",
     skipConfirmTitle: "Skip this question?",
-    skipConfirmDesc: "Are you sure you want to skip this question? Your recorded answer so far will be saved.",
+    skipConfirmDesc:
+      "Are you sure you want to skip this question? Your recorded answer so far will be saved.",
     skipConfirmYes: "Yes, Skip",
     cancel: "Cancel",
     autoSubmitTitle: "Interview Auto-Submitted",
     autoSubmitDesc: "You have exceeded the maximum allowed tab/window switches",
     submitNow: "Submit Now",
     finishConfirmTitle: "Finish Interview?",
-    finishConfirmDesc: "Are you sure you want to end the interview? You have completed",
+    finishConfirmDesc:
+      "Are you sure you want to end the interview? You have completed",
     continueInterview: "Continue Interview",
     endSubmit: "End & Submit",
     uploadingInterview: "Uploading Interview",
     interviewSubmitted: "Interview Submitted!",
-    submittedDesc: "Your interview has been submitted successfully. The hiring team will review and get back to you.",
+    submittedDesc:
+      "Your interview has been submitted successfully. The hiring team will review and get back to you.",
     summary: "Summary",
     candidate: "Candidate",
     questionsAnswered: "Questions answered",
@@ -76,7 +83,8 @@ export const translations = {
     footer: "© All Rights Reserved. Developed by Rawalwasia",
     listenRecording: "Listen to Recording",
     audioLink: "Audio Recording Link",
-    micPermissionError: "Microphone access is required for this interview. Please allow mic access and try again.",
+    micPermissionError:
+      "Microphone access is required for this interview. Please allow mic access and try again.",
     noMicError: "Could not access microphone. Please check permissions.",
   },
   hi: {
@@ -122,8 +130,10 @@ export const translations = {
     finish: "समाप्त करें",
 
     // 👇 YAHAN CHANGES KIYE GAYE HAIN 👇
-    tabSwitchWarning: (remaining: number) => `चेतावनी: आपने टैब/विंडो बदली है। अब केवल ${remaining} बार और बदल सकते हैं!`,
-    switchWarningBanner: (count: number, max: number) => `चेतावनी: आपने ${count} बार टैब/विंडो बदली है। ${max} सीमा पार करने पर इंटरव्यू स्वतः सबमिट होगा।`,
+    tabSwitchWarning: (remaining: number) =>
+      `चेतावनी: आपने टैब/विंडो बदली है। अब केवल ${remaining} बार और बदल सकते हैं!`,
+    switchWarningBanner: (count: number, max: number) =>
+      `चेतावनी: आपने ${count} बार टैब/विंडो बदली है। ${max} सीमा पार करने पर इंटरव्यू स्वतः सबमिट होगा।`,
     // 👆 ============================= 👆
 
     question: "प्रश्न",
@@ -141,7 +151,8 @@ export const translations = {
     endSubmit: "समाप्त और सबमिट करें",
     uploadingInterview: "इंटरव्यू अपलोड हो रहा है",
     interviewSubmitted: "इंटरव्यू सबमिट हो गया!",
-    submittedDesc: "आपका इंटरव्यू सफलतापूर्वक सबमिट हो गया है। हायरिंग टीम आपसे संपर्क करेगी।",
+    submittedDesc:
+      "आपका इंटरव्यू सफलतापूर्वक सबमिट हो गया है। हायरिंग टीम आपसे संपर्क करेगी।",
     summary: "सारांश",
     candidate: "उम्मीदवार",
     questionsAnswered: "उत्तर दिए गए प्रश्न",
