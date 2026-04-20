@@ -1,8 +1,0 @@
-{
-  "npm": {
-    "scripts": {
-      "postinstall": "corepack enable pnpm@9 && pnpm install --frozen-lockfile"
-    }
-  }
-}
-
