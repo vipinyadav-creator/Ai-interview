@@ -23,7 +23,7 @@ async function post<T>(
 ): Promise<T> {
   const res = await fetch(APPS_SCRIPT_URL, {
     method: "POST",
-    headers: { "Content-Type": "text/plain" }, // text/plain avoids CORS preflight
+    headers: { "Content-Type": "text/plain" }, 
     body: JSON.stringify({ action, ...params }),
     redirect: "follow",
   });
@@ -35,11 +35,9 @@ async function post<T>(
   } catch {
     throw new Error("Invalid response from server. Please try again.");
   }
-  // Return as-is; let the caller decide based on success/message fields
   return data as T;
 }
 
-// Maps to Apps Script action: sendOTP
 export async function requestOtp(
   interviewId: string,
   email: string,
@@ -47,7 +45,6 @@ export async function requestOtp(
   return post("sendOTP", { interviewId, email });
 }
 
-// Maps to Apps Script action: verifyOTP
 export async function verifyOtp(
   interviewId: string,
   email: string,
@@ -61,7 +58,6 @@ export async function verifyOtp(
   return { ...res, token: interviewId };
 }
 
-// Maps to Apps Script action: getInterviewData
 export async function initInterview(
   interviewId: string,
   _token: string,
@@ -119,14 +115,15 @@ export async function uploadChunk(
 export async function uploadAudioToDrive(
   audioBlob: Blob,
   fileName: string,
+  mimeType: string,
   candidateName: string,
   interviewId: string,
-): Promise<{ success: boolean; link: string }> {
+): Promise<{ success: boolean; link: string; message?: string }> {
   const base64 = await blobToBase64(audioBlob);
   return post("uploadAudio", {
     base64Data: base64,
     fileName,
-    mimeType: audioBlob.type || "audio/webm",
+    mimeType: mimeType || audioBlob.type || "audio/webm",
     candidateName,
     interviewId,
   });
