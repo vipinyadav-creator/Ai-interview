@@ -56,24 +56,19 @@ export default function InterviewScreen() {
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Interval to keep Chrome speechSynthesis alive (Chrome bug: pauses after ~15s)
   const ttsKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Safety fallback timeout in case onend never fires (Hindi voices on Chrome)
   const ttsFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingStarted = useRef(false);
   const navigating = useRef(false);
   const spokenIdxRef = useRef(-1);
   const goNextRef = useRef<() => void>(() => {});
-  // Debounce ref for screen switch tracking — prevents double-counting
   const lastSwitchTime = useRef(0);
 
   const totalQuestions = questions.length;
   const currentQuestion = questions[currentIdx];
-  const progressPercent =
-    ((QUESTION_DURATION - timeLeft) / QUESTION_DURATION) * 100;
+  const progressPercent = ((QUESTION_DURATION - timeLeft) / QUESTION_DURATION) * 100;
   const overallProgress = Math.round((currentIdx / totalQuestions) * 100);
 
-  // Stop the keep-alive interval
   const stopTtsKeepAlive = useCallback(() => {
     if (ttsKeepAliveRef.current) {
       clearInterval(ttsKeepAliveRef.current);
@@ -81,7 +76,6 @@ export default function InterviewScreen() {
     }
   }, []);
 
-  // Stop the safety fallback timeout
   const stopTtsFallback = useCallback(() => {
     if (ttsFallbackRef.current) {
       clearTimeout(ttsFallbackRef.current);
@@ -95,12 +89,10 @@ export default function InterviewScreen() {
   }, []);
 
   // --- Screen switch tracking ---
-  // Bug fix: debounce within 500ms so visibilitychange + blur firing together
-  // only counts as ONE switch. Also only count visibilitychange when hiding.
   useEffect(() => {
     const handleSwitch = () => {
       const now = Date.now();
-      if (now - lastSwitchTime.current < 500) return; // debounce
+      if (now - lastSwitchTime.current < 500) return;
       lastSwitchTime.current = now;
       setSwitchCount((c) => {
         const next = c + 1;
@@ -108,17 +100,14 @@ export default function InterviewScreen() {
           setShowForcedQuit(true);
         } else {
           const remaining = maxSwitch - next;
-          // Assuming a translation key like `switchWarning: (count) => `${count} switches left...`` exists
-          toast.warning(t.switchWarning(remaining));
+          // FIXED: Use tabSwitchWarning instead of switchWarning
+          toast.warning(t.tabSwitchWarning(remaining));
         }
         return next;
       });
     };
     const onHide = () => {
-      // Only count when tab goes hidden, not when it comes back
-      if (document.hidden) {
-        handleSwitch();
-      }
+      if (document.hidden) handleSwitch();
     };
     document.addEventListener("visibilitychange", onHide);
     window.addEventListener("blur", handleSwitch);
@@ -128,19 +117,20 @@ export default function InterviewScreen() {
     };
   }, [maxSwitch, t]);
 
+  // --- Timer logic FIXED ---
   const startTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     setTimeLeft(QUESTION_DURATION);
     timerRef.current = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          goNextRef.current();
-          return QUESTION_DURATION;
-        }
-        return prev - 1;
-      });
+      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
   }, []);
+
+  useEffect(() => {
+    if (timeLeft === 0) {
+      goNextRef.current();
+    }
+  }, [timeLeft]);
 
   const speakQuestion = useCallback(
     (text: string, idx: number, onDone: () => void) => {
@@ -149,60 +139,49 @@ export default function InterviewScreen() {
         return;
       }
 
-      // Cancel any ongoing speech, clear keep-alive and fallback
       window.speechSynthesis.cancel();
       stopTtsKeepAlive();
       stopTtsFallback();
 
-      // Build voice-assistant style announcement with question number.
       const prefix = `Question ${idx}. `;
       const announcement = prefix + text;
-
       const utterance = new SpeechSynthesisUtterance(announcement);
 
       const setBestVoice = () => {
         const voices = window.speechSynthesis.getVoices();
-        let bestVoice = null;
+        // FIXED: Explicitly allow SpeechSynthesisVoice or undefined
+        let bestVoice: SpeechSynthesisVoice | undefined = undefined;
 
         if (lang === "hi") {
-          // Prioritize high-quality Hindi voices
           bestVoice =
             voices.find((v) => v.name.includes("Google") && v.lang === "hi-IN") ||
-            voices.find(
-              (v) => v.name.includes("Microsoft") && v.lang === "hi-IN",
-            ) ||
+            voices.find((v) => v.name.includes("Microsoft") && v.lang === "hi-IN") ||
             voices.find((v) => v.lang === "hi-IN");
           utterance.lang = "hi-IN";
         } else {
-          // Default to English, prioritizing Indian English
           bestVoice =
             voices.find((v) => v.name.includes("Google") && v.lang === "en-IN") ||
-            voices.find(
-              (v) => v.name.includes("Microsoft") && v.lang === "en-IN",
-            ) ||
+            voices.find((v) => v.name.includes("Microsoft") && v.lang === "en-IN") ||
             voices.find((v) => v.lang === "en-IN");
           utterance.lang = "en-IN";
         }
         if (bestVoice) utterance.voice = bestVoice;
-        // Slightly slower rate for clearer Indian pronunciation
-        utterance.rate = 0.9; 
+        utterance.rate = 0.9;
         utterance.pitch = 1.0;
         utterance.volume = 1;
 
         window.speechSynthesis.speak(utterance);
       };
 
-      // Handle browser voice loading delay
       if (window.speechSynthesis.getVoices().length === 0) {
         window.speechSynthesis.onvoiceschanged = setBestVoice;
       } else {
         setBestVoice();
       }
-      // ==========================================
 
       utterance.onend = () => {
         stopTtsKeepAlive();
-        stopTtsFallback(); // Clear safety fallback — onend fired normally
+        stopTtsFallback();
         setIsSpeaking(false);
         onDone();
       };
@@ -215,20 +194,14 @@ export default function InterviewScreen() {
 
       setIsSpeaking(true);
 
-      // Chrome bug fix: speechSynthesis silently pauses after ~15 seconds.
-      // Only call resume() — do NOT pause() first, as pause()+resume() breaks
-      // Hindi voices on Chrome (causes onend to never fire or restarts utterance).
       ttsKeepAliveRef.current = setInterval(() => {
         if (window.speechSynthesis.speaking) {
-          window.speechSynthesis.resume(); // resume only, no pause
+          window.speechSynthesis.resume();
         } else {
           stopTtsKeepAlive();
         }
       }, 10000);
 
-      // Safety fallback: if onend never fires (common with Hindi voices on Chrome),
-      // force-complete TTS after estimated duration + buffer.
-      // ~3 chars/sec at rate 0.9, +5s safety buffer, minimum 8s.
       const estimatedMs = Math.max(
         8000,
         (announcement.length / (3 * utterance.rate)) * 1000 + 5000,
@@ -277,26 +250,24 @@ export default function InterviewScreen() {
         }
         streamRef.current = micStream;
 
-        const recordStream = micStream;
-
-        // Choose best available mimeType
-        // Prefer opus for quality, fallback webm
+        // FIXED: More robust mimeType fallback for cross-browser compatibility
         const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
           ? "audio/webm;codecs=opus"
-          : MediaRecorder.isTypeSupported("audio/mp4") 
+          : MediaRecorder.isTypeSupported("audio/mp4")
             ? "audio/mp4"
-            : "audio/webm";
+            : MediaRecorder.isTypeSupported("audio/aac")
+              ? "audio/aac"
+              : ""; 
 
-        const mr = new MediaRecorder(recordStream, {
-          mimeType,
-          audioBitsPerSecond: 96000,
-        });
+        const mrOptions = mimeType ? { mimeType, audioBitsPerSecond: 96000 } : { audioBitsPerSecond: 96000 };
+        const mr = new MediaRecorder(micStream, mrOptions);
+        
         mr.ondataavailable = (e) => {
           if (e.data.size > 0) chunksRef.current.push(e.data);
         };
         mr.start(250);
         void warmAudioConversion();
-        // Keep-alive: resume recorder if it somehow pauses (can happen on some browsers)
+        
         mrKeepAliveRef.current = setInterval(() => {
           if (mediaRecorderRef.current?.state === "paused") {
             mediaRecorderRef.current.resume();
@@ -319,13 +290,7 @@ export default function InterviewScreen() {
         }
       }
     })();
-  }, [
-    preparedMicStream,
-    questions,
-    speakQuestion,
-    startTimer,
-    t,
-  ]);
+  }, [preparedMicStream, questions, speakQuestion, startTimer, t]);
 
   useEffect(() => {
     if (spokenIdxRef.current === currentIdx) return;
@@ -333,7 +298,7 @@ export default function InterviewScreen() {
     speakQuestion(questions[currentIdx]?.question || "", currentIdx + 1, () =>
       startTimer(),
     );
-  }, [currentIdx, speakQuestion, startTimer, questions]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentIdx, speakQuestion, startTimer, questions]);
 
   const finishInterview = useCallback(
     (uids: string[], sc: number) => {
@@ -383,11 +348,12 @@ export default function InterviewScreen() {
     [setState, stopStream, stopTtsKeepAlive, stopTtsFallback],
   );
 
-  // Cleanup fallback timeout on unmount
+  // FIXED: Cleanup fallback and main timer on unmount
   useEffect(() => {
     return () => {
       stopTtsFallback();
       stopStream(streamRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [stopStream, stopTtsFallback]);
 
@@ -456,7 +422,6 @@ export default function InterviewScreen() {
   const fmt = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
-  // Pill color based on switch count
   const switchPillClass =
     switchCount >= 4
       ? "bg-status-red/10 text-status-red border-status-red/30"
@@ -466,9 +431,7 @@ export default function InterviewScreen() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col overflow-x-hidden">
-      {/* Top bar */}
       <header className="flex items-center justify-between px-3 sm:px-8 py-3 border-b border-border bg-white/95 backdrop-blur-sm sticky top-0 z-10">
-        {/* Brand */}
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-8 h-8 rounded-xl bg-brand-blue flex items-center justify-center shadow-sm flex-shrink-0">
             <BrainCircuit className="w-4 h-4 text-white" />
@@ -478,9 +441,7 @@ export default function InterviewScreen() {
           </span>
         </div>
 
-        {/* Right controls */}
         <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-          {/* Screen switch count - always visible */}
           <div
             className={`flex items-center gap-1 px-2 py-1 rounded-full border text-xs font-semibold ${switchPillClass}`}
             data-ocid="interview.switch_count.panel"
@@ -492,7 +453,6 @@ export default function InterviewScreen() {
             </span>
           </div>
 
-          {/* Finish button */}
           <Button
             size="sm"
             variant="destructive"
@@ -505,7 +465,6 @@ export default function InterviewScreen() {
         </div>
       </header>
 
-      {/* Overall progress strip */}
       <div className="h-1 bg-border">
         <div
           className="h-full bg-brand-blue transition-all duration-500"
@@ -513,7 +472,6 @@ export default function InterviewScreen() {
         />
       </div>
 
-      {/* Warning banner */}
       {switchCount >= 3 && switchCount < maxSwitch && (
         <div className="mx-3 sm:mx-4 mt-3 bg-status-amber/10 border border-status-amber/25 rounded-xl px-3 sm:px-4 py-3 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 text-status-amber flex-shrink-0" />
@@ -523,9 +481,7 @@ export default function InterviewScreen() {
         </div>
       )}
 
-      {/* Main content */}
       <main className="flex-1 flex flex-col items-center px-3 sm:px-8 py-4 sm:py-6 max-w-3xl mx-auto w-full">
-        {/* Top row: badges + counter */}
         <div className="flex items-center justify-between w-full mb-4 gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <Badge className="bg-brand-blue/10 text-brand-blue border-brand-blue/20 text-xs truncate max-w-[90px] sm:max-w-none">
@@ -542,7 +498,6 @@ export default function InterviewScreen() {
           </span>
         </div>
 
-        {/* Question card */}
         <div className="w-full card-glass rounded-2xl overflow-hidden shadow-sm mb-4">
           <div className="px-4 sm:px-5 pt-4 sm:pt-5 pb-2 flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground uppercase tracking-wide truncate">
@@ -589,11 +544,9 @@ export default function InterviewScreen() {
           </div>
         </div>
 
-        {/* Recording / Speaking indicator — always shows red dot when mic is active */}
         <div className="w-full card-glass rounded-2xl p-4 sm:p-5 flex flex-col items-center justify-center mb-4 min-h-[100px]">
           {isRecording ? (
             <>
-              {/* Red blinking dot + label — always visible while recording */}
               <div className="flex items-center gap-2.5 mb-3">
                 <div className="w-3 h-3 rounded-full bg-status-red pulse-recording flex-shrink-0" />
                 <span className="text-sm font-semibold text-status-red">
@@ -601,10 +554,8 @@ export default function InterviewScreen() {
                 </span>
               </div>
 
-              {/* Context-aware secondary status */}
               {isSpeaking ? (
                 <>
-                  {/* During TTS: show speaking wave + message */}
                   <div className="flex items-center gap-2 mb-2">
                     <Volume2 className="w-4 h-4 text-brand-blue animate-pulse" />
                     <span className="text-sm font-medium text-brand-blue">
@@ -617,7 +568,6 @@ export default function InterviewScreen() {
                 </>
               ) : (
                 <>
-                  {/* During answer: show animated bars + mic active label */}
                   <div className="flex items-end gap-1 h-10 mb-3">
                     {AUDIO_BARS.map((i) => (
                       <div
@@ -651,7 +601,6 @@ export default function InterviewScreen() {
           )}
         </div>
 
-        {/* Action buttons */}
         <div className="w-full flex gap-2 sm:gap-3">
           <Button
             variant="outline"
@@ -681,7 +630,6 @@ export default function InterviewScreen() {
         </p>
       </main>
 
-      {/* Skip Confirm */}
       <Dialog open={showSkipConfirm} onOpenChange={setShowSkipConfirm}>
         <DialogContent className="bg-white border-border max-w-sm mx-4 w-[calc(100vw-2rem)]">
           <DialogHeader>
@@ -710,7 +658,6 @@ export default function InterviewScreen() {
         </DialogContent>
       </Dialog>
 
-      {/* Force quit */}
       <Dialog open={showForcedQuit}>
         <DialogContent className="bg-white border-border max-w-sm mx-4 w-[calc(100vw-2rem)]">
           <DialogHeader>
@@ -733,7 +680,6 @@ export default function InterviewScreen() {
         </DialogContent>
       </Dialog>
 
-      {/* Finish confirm */}
       <Dialog open={showFinishConfirm} onOpenChange={setShowFinishConfirm}>
         <DialogContent className="bg-white border-border max-w-sm mx-4 w-[calc(100vw-2rem)]">
           <DialogHeader>
