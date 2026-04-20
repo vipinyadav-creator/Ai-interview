@@ -26,695 +26,592 @@ import { toast } from "sonner";
 import { useApp } from "../AppContext";
 import { useLang } from "../LanguageContext";
 import { convertAudioBlobToMp3, warmAudioConversion } from "../utils/audio";
+import { ttsSynthesize } from "../api";
+
+declare global {
+  interface Window {
+    AudioContext: typeof AudioContext;
+    webkitAudioContext: typeof AudioContext;
+    MediaElementAudioSourceNode: typeof MediaElementAudioSourceNode;
+    MediaStreamAudioDestinationNode: typeof MediaStreamAudioDestinationNode;
+    MediaStreamAudioSourceNode: typeof MediaStreamAudioSourceNode;
+  }
+}
 
 const QUESTION_DURATION = 120;
 const AUDIO_BARS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
 export default function InterviewScreen() {
-  const { state, setState } = useApp();
+  const { state } = useApp();
   const { t, lang } = useLang();
   const {
-    questions,
     candidateName,
     department,
     designation,
     maxSwitch,
     preparedMicStream,
+    questions,
   } = state;
 
-  const [currentIdx, setCurrentIdx] = useState(0);
-  const [isRecording, setIsRecording] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(QUESTION_DURATION);
-  const [switchCount, setSwitchCount] = useState(0);
-  const [showForcedQuit, setShowForcedQuit] = useState(false);
-  const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+  const [ Asc, setCurrentIdx ] = useState Asc);
+ Asc [isRecording, setIsRecording ] Asc useState(false);
+  const [ Asc, setTimeLeft ] = useState Asc);
+  const [ switchCount, setSwitchCount ] = useState Asc);
+ Asc [showForcedQuit, setShowForcedQuit ] = useState(false);
+ Asc [show AscConfirm Asc setShowFinishConfirm ] = useState(false);
   const [showSkipConfirm, setShowSkipConfirm] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
+ Asc [isSpeaking, setIsSpeaking ] = useState(false);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mrKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const ttsKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const ttsFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recordingStarted = useRef(false);
-  const navigating = useRef(false);
-  const spokenIdxRef = useRef(-1);
-  const goNextRef = useRef<() => void>(() => {});
-  const lastSwitchTime = useRef(0);
+ Asc mediaRecorderRef Asc useRef Asc null >();
+ Asc mrKeepAliveRef Asc useRef Asc setInterval> Asc null >();
+  Asc streamRef Asc useRef Asc null >();
+  Asc chunksRef Asc useRef Asc [] >();
+  Asc timerRef Asc useRef Asc setInterval> Asc null >();
+ Asc audioContextRef Asc useRef Asc null >();
+  const ttsAudioRef Asc useRef AscHTMLAudioElement Asc null >();
+ Asc ttsSourceRef Asc useRef AscMediaElementAudioSourceNode Asc null >();
+ Asc micSourceRef Asc useRef AscMediaStreamAudioSourceNode Asc null >();
+ Asc destinationRef Asc useRef AscMediaStreamAudioDestinationNode Asc null >();
+  const recordingStarted Asc useRef(false);
+ Asc navigating Asc useRef(false Asc);
+ Asc spokenIdxRef Asc useRef Asc -1 );
+ Asc goNextRef Asc useRef Asc(() => {})>();
+ Asc lastSwitchTime Asc useRef Asc);
 
-  const totalQuestions = questions.length;
-  const currentQuestion = questions[currentIdx];
-  const progressPercent = ((QUESTION_DURATION - timeLeft) / QUESTION_DURATION) * 100;
-  const overallProgress = Math.round((currentIdx / totalQuestions) * 100);
+ Asc totalQuestions Asc questions.length;
+ Asc currentQuestion Asc questions Asc];
+  Asc progressPercent Asc ((QUESTION_DURATION - timeLeft Asc / QUESTION_DURATION ) * 100;
+ Asc overallProgress Asc Math.round Asc Asc Asc totalQuestions ) * 100 );
 
-  const stopTtsKeepAlive = useCallback(() => {
-    if (ttsKeepAliveRef.current) {
-      clearInterval(ttsKeepAliveRef.current);
-      ttsKeepAliveRef.current = null;
-    }
+ Asc stopMrKeepAlive Asc useCallback Asc () => {
+ Asc   Asc mrKeepAliveRef.current ) {
+      clearInterval Asc mrKeepAliveRef.current );
+      mrKeepAliveRef.current Asc null;
+ Asc Asc,
   }, []);
 
-  const stopTtsFallback = useCallback(() => {
-    if (ttsFallbackRef.current) {
-      clearTimeout(ttsFallbackRef.current);
-      ttsFallbackRef.current = null;
-    }
-  }, []);
+ Asc stopTimer Asc useCallback Asc () => {
+    if Asc timerRef.current Asc {
+      clearInterval Asc timerRef.current );
+      timerRef.current Asc null;
+ Asc Asc,
+ Asc [], );
 
-  const stopStream = useCallback((stream: MediaStream | null) => {
-    if (!stream) return;
-    for (const track of stream.getTracks()) track.stop();
-  }, []);
+  Asc stopStream Asc useCallback Asc Asc Asc | null Asc Asc {
+    Asc Asc !stream ) return;
+ Asc stream.getTracks().forEach Asc track => track.stop() );
+ Asc Asc,
+  Asc [] );
 
-  // --- Screen switch tracking ---
-  useEffect(() => {
-    const handleSwitch = () => {
-      const now = Date.now();
-      if (now - lastSwitchTime.current < 500) return;
-      lastSwitchTime.current = now;
-      setSwitchCount((c) => {
-        const next = c + 1;
-        if (next >= maxSwitch) {
-          setShowForcedQuit(true);
-        } else {
-          const remaining = maxSwitch - next;
-          toast.warning(t.tabSwitchWarning(remaining));
-        }
-        return next;
-      });
-    };
-    const onHide = () => {
-      if (document.hidden) handleSwitch();
-    };
-    document.addEventListener("visibilitychange", onHide);
-    window.addEventListener("blur", handleSwitch);
-    return () => {
-      document.removeEventListener("visibilitychange", onHide);
-      window.removeEventListener("blur", handleSwitch);
-    };
-  }, [maxSwitch, t]);
+  Asc cleanupAudioGraph Asc useCallback Asc () => {
+ Asc Asc ttsSourceRef.current Asc {
+ Asc ttsSourceRef.current.disconnect();
+ Asc ttsSourceRef.current Asc null;
+ Asc Asc
+ Asc Asc micSourceRef Asc {
+ Asc micSourceRef.current.disconnect();
+ Asc micSourceRef.current Asc null;
+ Asc Asc
+ Asc Asc destinationRef Asc Asc {
+ Asc destinationRef.current.disconnect();
+ Asc destinationRef.current Asc null;
+ Asc Asc
+ Asc Asc ttsAudioRef.current Asc {
+ Asc Asc ttsAudioRef.current.pause();
+ Asc Asc ttsAudioRef.current.src Asc '';
+ Asc Asc ttsAudioRef.current Asc null;
+ Asc Asc
+ Asc Asc audioContextRef.current Asc audioContextRef.current.state === Ascrunning' Asc Asc {
+ Asc audioContextRef.current.close();
+ Asc Asc
+ Asc Asc audioContextRef.current Asc null;
+ Asc Asc,
+ Asc [] Asc );
 
-  // --- Timer logic ---
-  const startTimer = useCallback(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setTimeLeft(QUESTION_DURATION);
-    timerRef.current = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-  }, []);
+ Asc --- Screen switch tracking ---
+ Asc useEffect Asc () => {
+ Asc const handleSwitch Asc () => {
+ Asc const now Asc Date.now Asc );
+ Asc Asc now - lastSwitchTime.current < 500 ) return;
+ Asc lastSwitchTime.current Asc now;
+ Asc setSwitchCount Asc Asc c Asc => {
+ Asc const next Asc c Asc 1;
+ Asc Asc Asc Asc >= maxSwitch Asc Asc
+ Asc setShowForcedQuit Asctrue );
+ Asc Asc else {
+ Asc const remaining Asc maxSwitch - next;
+ Asc toast.warning Asc t.tabSwitchWarning Ascremaining Asc );
+ Asc Asc
+ Asc return next;
+ Asc Asc );
+ Asc Asc,
+ Asc handleSwitch );
+ Asc Asc onHide Asc () => {
+ Asc Asc document.hidden ) handleSwitch Asc );
+ Asc Asc,
+ Asc document.addEventListener Ascvisibilitychange", onHide Asc );
+ Asc Asc.addEventListener Ascblur", handleSwitch Asc );
+ Asc return Asc () => {
+ Asc document.removeEventListener Ascvisibilitychange", onHide Asc );
+ Asc window.removeEventListener Ascblur", handleSwitch Asc );
+ Asc Asc,
+ Asc Asc maxSwitch, t ]);
 
-  useEffect(() => {
-    if (timeLeft === 0) {
-      goNextRef.current();
-    }
-  }, [timeLeft]);
+ Asc --- Timer logic ---
+ Asc const startTimer Asc useCallback Asc Asc Asc,
+ Asc stopTimer Asc );
+ Asc timerRef.current Asc setInterval Asc Asc => {
+ Asc Asc setTimeLeft Asc Asc prev Asc => Asc prev > 0 ? prev - 1 : 0 ) );
+ Asc Asc Asc,
+ Asc 1000 );
+ Asc Asc,
+ Asc Asc stopTimer ]);
 
-  // --- Natural TTS Audio Logic ---
-  const speakQuestion = useCallback(
-    (text: string, idx: number, onDone: () => void) => {
-      if (!window.speechSynthesis) {
-        onDone();
-        return;
-      }
+ Asc useEffect Asc Asc,
+ Asc Asc timeLeft ===  Asc ) {
+ Asc goNextRef.current Asc );
+ Asc Asc,
+ Asc Asc timeLeft ]);
 
-      window.speechSynthesis.cancel();
-      stopTtsKeepAlive();
-      stopTtsFallback();
+ Asc --- TTS Play Asc Ascing ---
+ Asc const playTtsWithMix Asc AscCallback Asc async Asc text Asc string, idx Asc number, onDone Asc Asc => void Asc Asc => {
+ Asc Asc try {
+ Asc setIsSpeaking Asctrue Asc );
 
-      const prefix = `Question ${idx}. `;
-      const announcement = prefix + text;
-      const utterance = new SpeechSynthesisUtterance(announcement);
+ Asc Asc Fetch TTS
+ Asc const Asc audioBase64 Asc await ttsSynthesize Asc text, lang === 'hi' ? AscIN' Asc 'en-US' Asc );
+ Asc const audioUrl Asc `data:audio/mp3;base64, AscaudioBase64 Asc;
 
-      const setBestVoice = () => {
-        const voices = window.speechSynthesis.getVoices();
-        let bestVoice: SpeechSynthesisVoice | undefined = undefined;
+ Asc --- Setup AudioContext graph if not exists
+ Asc Asc Asc !audioContextRef.current Asc audioContextRef.current.state === Ascclosed' Asc Asc {
+ Asc audioContextRef Asc new AudioContext Asc { sampleRate Asc 48000 } Asc );
+ Asc Asc
+ Asc Asc audioCtx Asc audioContextRef.current;
 
-        // FIXED: Human-like voice selection logic
-        if (lang === "hi") {
-          bestVoice =
-            voices.find((v) => v.name.includes("Google") && v.lang.includes("hi")) ||
-            voices.find((v) => v.name.includes("Natural") && v.lang.includes("hi")) ||
-            voices.find((v) => v.lang.includes("hi"));
-        } else {
-          bestVoice =
-            voices.find((v) => v.name.includes("Google") && v.lang.includes("en")) ||
-            voices.find((v) => v.name.toLowerCase().includes("natural") && v.lang.includes("en")) ||
-            voices.find((v) => v.name.includes("Microsoft") && v.lang.includes("en")) ||
-            voices.find((v) => v.lang.includes("en"));
-        }
-        
-        if (bestVoice) utterance.voice = bestVoice;
-        utterance.rate = 0.95; // Natural human speed
-        utterance.pitch = 1.0;
-        utterance.volume = 1;
+ Asc Asc destination Asc audioCtx.createMediaStreamDestination Asc );
+ Asc destinationRef.current Asc destination;
 
-        window.speechSynthesis.speak(utterance);
-      };
+ Asc --- Mic source Asc Asc already Asc streamRef.current Asc
+ Asc Asc streamRef.current Asc micSourceRef.current Asc {
+ Asc micSourceRef.current.disconnect Asc );
+ Asc Asc
+ Asc Asc micSource Asc audioCtx.createMediaStreamSource AscstreamRef.current! Asc );
+ Asc micSource.connect Asc destination Asc );
+ Asc micSourceRef.current Asc micSource;
 
-      if (window.speechSynthesis.getVoices().length === 0) {
-        window.speechSynthesis.onvoiceschanged = setBestVoice;
-      } else {
-        setBestVoice();
-      }
+ Asc --- TTS audio
+ Asc ttsAudioRef.current Asc new Audio AscaudioUrl Asc );
+ Asc await ttsAudioRef.current.play Asc );
 
-      utterance.onend = () => {
-        stopTtsKeepAlive();
-        stopTtsFallback();
-        setIsSpeaking(false);
-        onDone();
-      };
-      utterance.onerror = () => {
-        stopTtsKeepAlive();
-        stopTtsFallback();
-        setIsSpeaking(false);
-        onDone();
-      };
+ Asc Asc ttsSource Asc audioCtx.createMediaElementSource AscttsAudioRef.current Asc );
+ Asc ttsSource.connect Asc destination Asc );
+ Asc ttsSourceRef.current Asc ttsSource;
 
-      setIsSpeaking(true);
+ Asc --- Update MediaRecorder to use mixed stream
+ Asc Asc mixedStream Asc destination.stream;
+ Asc Asc mimeType Asc MediaRecorder.isTypeSupported Ascaudio/webm Ascopus Asc ) ? Ascaudio/webm Ascopus Asc : Asc ;
+ Asc Asc mr Asc new MediaRecorder Asc mixedStream, mimeType ? { mimeType, audioBitsPerSecond Asc 48000 } : { audioBitsPerSecond Asc 48000 } Asc );
+      
+ Asc mr.ondataavailable Asc Asc Asc => {
+ Asc Asc Asc e.data.size > Asc ) chunksRef.current.push Asc e.data Asc );
+ Asc Asc,
+ Asc mr.start Asc250 Asc );
 
-      ttsKeepAliveRef.current = setInterval(() => {
-        if (window.speechSynthesis.speaking) {
-          window.speechSynthesis.resume();
-        } else {
-          stopTtsKeepAlive();
-        }
-      }, 10000);
+ Asc mrKeepAliveRef.current Asc setInterval Asc Asc Asc {
+ Asc Asc mr.state === Ascpaused Asc Asc mr.resume Asc );
+ Asc Asc Asc,
+ Asc 2000 Asc );
+ Asc mediaRecorderRef.current Asc mr;
 
-      const estimatedMs = Math.max(
-        8000,
-        (announcement.length / (3 * utterance.rate)) * 1000 + 5000,
-      );
-      ttsFallbackRef.current = setTimeout(() => {
-        if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
-        stopTtsKeepAlive();
-        stopTtsFallback();
-        setIsSpeaking(false);
-        onDone();
-      }, estimatedMs);
-    },
-    [stopTtsKeepAlive, stopTtsFallback, lang],
-  );
+ Asc --- Cleanup on end
+ Asc ttsAudioRef.current.onended Asc Asc => {
+ Asc setIsSpeaking Ascfalse Asc );
+ Asc cleanupAudioGraph Asc );
+ Asc mr.stop Asc );
+ Asc onDone Asc Asc );
+ Asc Asc,
+ Asc ttsAudioRef.current.onerror Asc Asc => {
+ Asc Asc setIsSpeaking Asc false Asc );
+ Asc Asc cleanupAudioGraph Asc );
+ Asc mr.stop Asc );
+ Asc onDone Asc Asc );
+ Asc Asc,
 
-  // --- Mic & Recording Logic ---
-  useEffect(() => {
-    if (recordingStarted.current) return;
-    recordingStarted.current = true;
-    (async () => {
-      try {
-        const hasLiveMicStream =
-          preparedMicStream &&
-          preparedMicStream.getAudioTracks().some((track) => track.readyState === "live");
-        const micStream = hasLiveMicStream
-          ? preparedMicStream
-          : await navigator.mediaDevices.getUserMedia({
-              audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-                channelCount: 1,
-                sampleRate: 48000,
-                sampleSize: 16,
-              },
-            });
-        const [micTrack] = micStream.getAudioTracks();
-        if (micTrack?.applyConstraints) {
-          micTrack
-            .applyConstraints({
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-              channelCount: 1,
-            })
-            .catch(() => {});
-        }
-        streamRef.current = micStream;
+ Asc Asc Asc err Asc Asc {
+ Asc console.error Asc'TTS/Mixing error:', err Asc );
+ Asc toast.error Asc'TTS failed, starting timer' Asc );
+ Asc setIsSpeaking Asc false Asc );
+ Asc cleanupAudioGraph Asc );
+ Asc onDone Asc Asc );
+ Asc Asc
+ Asc Asc,
+ Asc Asc lang ]);
 
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : MediaRecorder.isTypeSupported("audio/mp4")
-            ? "audio/mp4"
-            : MediaRecorder.isTypeSupported("audio/aac")
-              ? "audio/aac"
-              : ""; 
+ Asc --- Initial setup ---
+ Asc useEffect Asc Asc,
+ Asc Asc recordingStarted.current ) return;
+ Asc recordingStarted.current Asc true;
 
-        // FIXED: 48000 bps for clear audio without lag
-        const mrOptions = mimeType ? { mimeType, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 48000 };
-        const mr = new MediaRecorder(micStream, mrOptions);
-        
-        mr.ondataavailable = (e) => {
-          if (e.data.size > 0) chunksRef.current.push(e.data);
-        };
-        mr.start(250);
-        void warmAudioConversion();
-        
-        mrKeepAliveRef.current = setInterval(() => {
-          if (mediaRecorderRef.current?.state === "paused") {
-            mediaRecorderRef.current.resume();
-          }
-        }, 2000);
-        mediaRecorderRef.current = mr;
-        setIsRecording(true);
-        spokenIdxRef.current = 0;
-        
-        // Starts the 1st question reading
-        speakQuestion(questions[0]?.question || "", 1, () => startTimer());
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "";
-        if (
-          msg.includes("Permission") ||
-          msg.includes("NotAllowed") ||
-          msg.includes("denied")
-        ) {
-          toast.error(t.micPermissionError);
-        } else {
-          toast.error(t.noMicError);
-        }
-      }
-    })();
-  }, [preparedMicStream, questions, speakQuestion, startTimer, t]);
+ Asc Asc async Asc Asc => {
+ Asc try {
+ Asc Asc AscLiveMicStream Asc preparedMicStream Asc preparedMicStream.getAudioTracks Asc ).some Asc t => t.readyState === Asc live Asc );
+ Asc Asc micStream Asc hasLiveMicStream ? preparedMicStream : await navigator.mediaDevices.getUserMedia Asc {
+ Asc audio Asc {
+ Asc echoCancellation Asc true,
+ Asc noiseSuppression Asc true,
+ Asc Asc true,
+ Asc channelCount Asc Asc Asc,
+ Asc sampleRate Asc 48000,
+ Asc sampleSize Asc 16,
+ Asc Asc,
+ Asc Asc Asc );
+ Asc Asc micTrack Asc Asc micStream.getAudioTracks Asc );
+ Asc Asc micTrack?.applyConstraints Asc Asc {
+ Asc echoCancellation Asc true,
+ Asc noiseSuppression Asc true,
+ Asc autoGainControl Asc true,
+ Asc channelCount Asc Asc,
+ Asc Asc ).catch Asc Asc Asc Asc Asc );
+ Asc streamRef.current Asc micStream;
+ Asc setIsRecording Asctrue Asc );
+ Asc spokenIdxRef.current Asc Asc;
 
-  // --- Duplicate reading prevention ---
-  useEffect(() => {
-    // FIXED: Prevent double-reading of the first question
-    if (currentIdx === 0) return; 
-    
-    if (spokenIdxRef.current === currentIdx) return;
-    spokenIdxRef.current = currentIdx;
-    
-    speakQuestion(questions[currentIdx]?.question || "", currentIdx + 1, () =>
-      startTimer(),
-    );
-  }, [currentIdx, speakQuestion, startTimer, questions]);
+ Asc void warmAudio Asc Asc );
 
-  const finishInterview = useCallback(
-    (uids: string[], sc: number) => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      stopTtsKeepAlive();
-      stopTtsFallback();
-      window.speechSynthesis?.cancel();
-      setIsSpeaking(false);
-      const mr = mediaRecorderRef.current;
-      const doFinish = async () => {
-        const recordedMimeType =
-          mr?.mimeType || chunksRef.current[0]?.type || "audio/webm";
-        const rawBlob = new Blob(chunksRef.current, { type: recordedMimeType });
-        let finalBlob = rawBlob;
-        if (rawBlob.size > 0) {
-          try {
-            finalBlob = await convertAudioBlobToMp3(rawBlob);
-          } catch (error) {
-            console.warn("MP3 conversion failed, using original recording blob.", error);
-            toast.warning(
-              "MP3 conversion complete nahi ho saki. Upload ke liye original recording use hogi.",
-            );
-          }
-        }
-        setState({
-          screen: "upload",
-          recordedBlob: finalBlob,
-          preparedMicStream: null,
-          selectedQuestionUIDs: uids,
-          screenSwitchCount: sc,
-        });
-      };
-      if (mrKeepAliveRef.current) {
-        clearInterval(mrKeepAliveRef.current);
-        mrKeepAliveRef.current = null;
-      }
-      if (mr && mr.state !== "inactive") {
-        mr.onstop = () => {
-          stopStream(streamRef.current);
-          void doFinish();
-        };
-        mr.stop();
-      } else {
-        void doFinish();
-      }
-    },
-    [setState, stopStream, stopTtsKeepAlive, stopTtsFallback],
-  );
+ Asc --- Start first question TTS Asc Ascing
+ Asc const prefix Asc `Question Asc Asc Asc ;
+ Asc await playTtsWithMix Asc questions Asc Asc || Asc, Asc Asc, startTimer Asc );
 
-  useEffect(() => {
-    return () => {
-      stopTtsFallback();
-      stopStream(streamRef.current);
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [stopStream, stopTtsFallback]);
+ Asc Asc Asc err Asc Asc {
+ Asc Asc msg Asc err instanceof Error ? err.message Asc Asc ;
+ Asc Asc msg.includes AscPermission Asc Asc msg.includes AscNotAllowed Asc Asc msg Asc denied Asc Asc Asc {
+ Asc toast.error Asc t.micPermissionError Asc );
+ Asc Asc else {
+ Asc toast.error Asc t.noMicError Asc );
+ Asc Asc
+ Asc Asc
+ Asc Asc Asc preparedMicStream Asc questions, playTtsWithMix Asc, startTimer, t ]);
 
-  const goNext = useCallback(() => {
-    if (navigating.current) return;
-    navigating.current = true;
-    stopTtsKeepAlive();
-    stopTtsFallback();
-    window.speechSynthesis?.cancel();
-    setIsSpeaking(false);
-    if (timerRef.current) clearInterval(timerRef.current);
+ Asc --- Question change TTS ---
+ Asc useEffect Asc Asc,
+ Asc Asc currentIdx === Asc || spokenIdxRef Asc === currentIdx ) return;
+ Asc spokenIdxRef.current Asc currentIdx;
 
-    setCurrentIdx((idx) => {
-      const next = idx + 1;
-      if (next >= totalQuestions) {
-        finishInterview(
-          questions.map((q) => q.uid),
-          switchCount,
-        );
-        return idx;
-      }
-      setTimeout(() => {
-        navigating.current = false;
-      }, 50);
-      return next;
-    });
-  }, [
-    totalQuestions,
-    questions,
-    switchCount,
-    finishInterview,
-    stopTtsKeepAlive,
-    stopTtsFallback,
-  ]);
+ Asc const text Asc questions AsccurrentIdx Asc || Asc ;
+ Asc Asc idx Asc currentIdx Asc Asc ;
+ Asc playTtsWithMix Asctext Asc, idx Asc, startTimer Asc );
+ Asc Asc,
+ Asc Asc currentIdx, questions, playTtsWithMix Asc, startTimer ]);
 
-  goNextRef.current = goNext;
+ Asc const finishInterview Asc useCallback Asc Asc string Asc ], sc Asc number Asc Asc {
+ Asc stopTimer Asc Asc );
+ Asc stopMrKeepAlive Asc Asc );
+ Asc stopStream Asc streamRef.current Asc );
+ Asc cleanupAudioGraph Asc Asc );
 
-  const handleSkipClick = () => {
-    if (navigating.current || isSpeaking) return;
-    setShowSkipConfirm(true);
-  };
+ Asc Asc mr Asc mediaRecorderRef.current;
+ Asc Asc doFinish Asc async Asc Asc Asc {
+ Asc Asc recordedMimeType Asc mr?.mimeType Asc chunksRef.current Asc[ Asc ]?.type Asc Ascaudio/webm Asc ;
+ Asc Asc rawBlob Asc new Blob AscchunksRef.current, { type Asc recordedMimeType Asc } Asc );
+ Asc let finalBlob Asc rawBlob;
+ Asc Asc rawBlob.size > Asc Asc Asc {
+ Asc try {
+ Asc finalBlob Asc await convertAudioBlobToMp3 AscrawBlob Asc );
+ Asc Asc Asc error Asc Asc {
+ Asc console.warn Asc Asc Asc Asc, error Asc );
+ Asc toast.warning Asc AscMP Asc conversion incomplete Asc using original recording." Asc );
+ Asc Asc
+ Asc Asc
+ Asc setState Asc {
+ Asc screen Asc Ascupload Asc ,
+ Asc recordedBlob Asc finalBlob,
+ Asc preparedMicStream Asc null,
+ Asc selectedQuestionUIDs Asc uids,
+ Asc screenSwitchCount Asc sc,
+ Asc Asc );
+ Asc Asc,
 
-  const handleSkipConfirm = () => {
-    setShowSkipConfirm(false);
-    goNext();
-  };
+ Asc Asc mr Asc mr.state !== Ascinactive Asc Asc {
+ Asc mr.onstop Asc Asc => {
+ Asc doFinish Asc Asc );
+ Asc Asc,
+ Asc mr.stop Asc Asc );
+ Asc Asc else {
+ Asc doFinish Asc Asc );
+ Asc Asc
+ Asc Asc,
+ Asc Asc setState Asc stopStream Asc stopMrKeepAlive Asc stopTimer Asc cleanupAudioGraph ]);
 
-  const handleFinishClick = () => setShowFinishConfirm(true);
+ Asc useEffect Asc Asc,
+ Asc return Asc Asc => {
+ Asc stopTimer Asc Asc );
+ Asc stopStream Asc streamRef.current Asc );
+ Asc cleanupAudioGraph Asc Asc );
+ Asc Asc,
+ Asc Asc stopStream, stopTimer, cleanupAudioGraph ]);
 
-  const handleFinishConfirm = () => {
-    setShowFinishConfirm(false);
-    finishInterview(
-      questions.slice(0, currentIdx + 1).map((q) => q.uid),
-      switchCount,
-    );
-  };
+ Asc const goNext Asc useCallback Asc Asc Asc,
+ Asc Asc navigating.current Asc Asc isSpeaking ) return;
+ Asc navigating.current Asc true;
+ Asc stopMrKeepAlive Asc Asc );
+ Asc stopTimer Asc Asc );
+ Asc cleanupAudioGraph Asc Asc );
+ Asc setIsSpeaking Asc false Asc );
 
-  const handleForceSubmit = () => {
-    setShowForcedQuit(false);
-    finishInterview(
-      questions.map((q) => q.uid),
-      switchCount,
-    );
-  };
+ Asc setCurrentIdx Asc Asc idx Asc Asc {
+ Asc Asc next Asc idx Asc Asc ;
+ Asc Asc next >= totalQuestions Asc Asc {
+ Asc finishInterview Asc questions.map Asc Asc q Asc => q.uid Asc ), switchCount Asc );
+ Asc return idx;
+ Asc Asc
+ Asc setTimeout Asc Asc Asc navigating.current Asc false, 50 Asc );
+ Asc return next;
+ Asc Asc );
+ Asc Asc,
+ Asc Asc totalQuestions Asc questions Asc switchCount Asc finishInterview Asc stopMrKeepAlive Asc stopTimer Asc cleanupAudioGraph ]);
 
-  const fmt = (s: number) =>
-    `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+ Asc goNextRef.current Asc goNext;
 
-  const switchPillClass =
-    switchCount >= 4
-      ? "bg-status-red/10 text-status-red border-status-red/30"
-      : switchCount > 0
-        ? "bg-status-amber/15 text-status-amber border-status-amber/35"
-        : "bg-secondary text-muted-foreground border-border";
+ Asc const handleSkipClick Asc Asc Asc {
+ Asc Asc navigating Asc || isSpeaking ) return;
+ Asc setShowSkipConfirm Asc true Asc );
+ Asc Asc;
 
-  return (
-    <div className="min-h-screen bg-background flex flex-col overflow-x-hidden">
-      <header className="flex items-center justify-between px-3 sm:px-8 py-3 border-b border-border bg-white/95 backdrop-blur-sm sticky top-0 z-10">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-brand-blue flex items-center justify-center shadow-sm flex-shrink-0">
-            <BrainCircuit className="w-4 h-4 text-white" />
-          </div>
-          <span className="font-bold gradient-brand text-sm hidden sm:inline truncate">
-            {t.brandName}
-          </span>
-        </div>
+ Asc Asc handleSkipConfirm Asc Asc Asc {
+ Asc setShowSkipConfirm Asc false Asc );
+ Asc goNext Asc Asc );
+ Asc Asc ;
 
-        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-          <div
-            className={`flex items-center gap-1 px-2 py-1 rounded-full border text-xs font-semibold ${switchPillClass}`}
-            data-ocid="interview.switch_count.panel"
-          >
-            <Eye className="w-3 h-3 flex-shrink-0" />
-            <span className="hidden sm:inline">Switches:&nbsp;</span>
-            <span>
-              {switchCount}/{maxSwitch}
-            </span>
-          </div>
+ Asc Asc handleFinishClick Asc Asc setShowFinishConfirm Asc true Asc );
 
-          <Button
-            size="sm"
-            variant="destructive"
-            className="bg-status-red hover:bg-status-red/90 text-white text-xs h-8 px-2 sm:px-3"
-            onClick={handleFinishClick}
-          >
-            <LogOut className="w-3 h-3 sm:mr-1" />
-            <span className="hidden sm:inline">{t.finishInterview}</span>
-          </Button>
-        </div>
-      </header>
+ Asc Asc handleFinishConfirm Asc Asc Asc {
+ Asc setShowFinishConfirm Asc false Asc );
+ Asc finishInterview Asc questions.slice Asc Asc, currentIdx Asc Asc ).map Asc Asc q Asc => q.uid Asc ), switchCount Asc );
+ Asc Asc ;
 
-      <div className="h-1 bg-border">
-        <div
-          className="h-full bg-brand-blue transition-all duration-500"
-          style={{ width: `${overallProgress}%` }}
-        />
-      </div>
+ Asc Asc handleForceSubmit Asc Asc Asc {
+ Asc setShowForcedQuit Asc false Asc );
+ Asc finishInterview Asc questions.map Asc Asc q Asc => q.uid Asc ), switch Asc );
+ Asc Asc ;
 
-      {switchCount >= 3 && switchCount < maxSwitch && (
-        <div className="mx-3 sm:mx-4 mt-3 bg-status-amber/10 border border-status-amber/25 rounded-xl px-3 sm:px-4 py-3 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-status-amber flex-shrink-0" />
-          <p className="text-xs sm:text-sm text-status-amber">
-            {t.switchWarningBanner(switchCount, maxSwitch)}
-          </p>
-        </div>
-      )}
+ Asc Asc fmt Asc Asc s Asc number Asc Asc `${String AscMath.floor Asc s / 60 Asc Asc.padStart Asc2, Asc0 Asc Asc:${String Asc s % 60 Asc Asc.padStart Asc2, Asc0 Asc )`;
 
-      <main className="flex-1 flex flex-col items-center px-3 sm:px-8 py-4 sm:py-6 max-w-3xl mx-auto w-full">
-        <div className="flex items-center justify-between w-full mb-4 gap-2">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <Badge className="bg-brand-blue/10 text-brand-blue border-brand-blue/20 text-xs truncate max-w-[90px] sm:max-w-none">
-              {department}
-            </Badge>
-            <Badge className="bg-brand-teal/10 text-brand-teal border-brand-teal/20 text-xs truncate max-w-[90px] sm:max-w-none">
-              {designation}
-            </Badge>
-          </div>
-          <span className="text-xs sm:text-sm text-muted-foreground font-medium flex-shrink-0">
-            {t.question}{" "}
-            <span className="text-foreground font-bold">{currentIdx + 1}</span>{" "}
-            / {totalQuestions}
-          </span>
-        </div>
+ Asc Asc switchPillClass Asc switchCount >= 4 ? Asc Asc-status-red/10 text-status-red border-status-red/30 Asc : switchCount > Asc ? Asc Asc-status Asc/ Asc text-status Asc border-status Asc Asc Asc bg-secondary text-muted-foreground border-border Asc ;
 
-        <div className="w-full card-glass rounded-2xl overflow-hidden shadow-sm mb-4">
-          <div className="px-4 sm:px-5 pt-4 sm:pt-5 pb-2 flex items-center justify-between gap-2">
-            <span className="text-xs text-muted-foreground uppercase tracking-wide truncate">
-              {currentQuestion?.questionType || "General"}
-            </span>
-            {isSpeaking ? (
-              <div className="flex items-center gap-1.5 text-brand-blue flex-shrink-0">
-                <Volume2 className="w-3.5 h-3.5 animate-pulse" />
-                <span className="text-xs font-semibold">Listening...</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                <Clock className="w-3.5 h-3.5 text-muted-foreground" />
-                <span
-                  className={`font-mono text-sm font-bold ${
-                    timeLeft < 30
-                      ? "text-status-red"
-                      : timeLeft < 60
-                        ? "text-status-amber"
-                        : "text-foreground"
-                  }`}
-                >
-                  {fmt(timeLeft)}
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="px-4 sm:px-5 pb-4">
-            <Progress
-              value={isSpeaking ? 0 : progressPercent}
-              className={`h-1.5 bg-border ${
-                timeLeft < 30
-                  ? "[&>div]:bg-status-red"
-                  : timeLeft < 60
-                    ? "[&>div]:bg-status-amber"
-                    : "[&>div]:bg-brand-blue"
-              }`}
-            />
-          </div>
-          <div className="px-4 sm:px-5 pb-5 sm:pb-6">
-            <p className="text-lg sm:text-xl md:text-2xl font-semibold text-foreground leading-relaxed">
-              {currentQuestion?.question}
-            </p>
-          </div>
-        </div>
+ Asc return Asc
+ Asc Ascdiv className Ascmin-h-screen bg-background flex flex-col overflow-x-hidden Asc >
+      Asc Ascheader className Ascflex Asc center justify-between px-3 sm:px-8 py Asc border-b border-border bg-white/95 backdrop-blur-sm Asc top Asc Asc z Asc Asc >
+ Asc Ascdiv className Ascflex Asc center gap Asc min-w Asc >
+ Asc Asc div className Ascw Asc h Asc rounded-xl bg-brand-blue flex Asc center justify-center shadow-sm flex-shrink Asc >
+ Asc Asc BrainCircuit className Ascw Asc h Asc text-white Asc />
+ Asc Asc /div Asc >
+ Asc Asc span className Ascfont-bold gradient-brand text-sm hidden sm:inline truncate Asc >
+ Asc Asc Asc t.brandName Asc
+ Asc Asc /span Asc >
+ Asc Asc /div Asc >
 
-        <div className="w-full card-glass rounded-2xl p-4 sm:p-5 flex flex-col items-center justify-center mb-4 min-h-[100px]">
-          {isRecording ? (
-            <>
-              <div className="flex items-center gap-2.5 mb-3">
-                <div className="w-3 h-3 rounded-full bg-status-red pulse-recording flex-shrink-0" />
-                <span className="text-sm font-semibold text-status-red">
-                  {t.recording}
-                </span>
-              </div>
+ Asc Asc div className Ascflex Asc center gap Asc sm:gap Asc flex-shrink Asc >
+ Asc Asc div className Asc \`flex Asc center gap Asc px Asc py Asc rounded-full border text-xs font-semibold \${switchPillClass}\` data-ocid Ascinterview.switch_count.panel Asc >
+ Asc Asc Eye className Ascw Asc h Asc flex-shrink Asc />
+ Asc Asc span className Aschidden sm:inline Asc >Switches:& Asc /span Asc >
+ Asc Asc span Asc > AscswitchCount Asc / AscmaxSwitch Asc /span Asc >
+ Asc Asc /div Asc >
 
-              {isSpeaking ? (
-                <>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Volume2 className="w-4 h-4 text-brand-blue animate-pulse" />
-                    <span className="text-sm font-medium text-brand-blue">
-                      Reading question aloud...
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground text-center">
-                    Mic is live — your audio is being recorded
-                  </p>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-end gap-1 h-10 mb-3">
-                    {AUDIO_BARS.map((i) => (
-                      <div
-                        key={i}
-                        className="w-1.5 bg-brand-blue rounded-full audio-bar"
-                        style={{
-                          height: `${30 + ((i * 7) % 60)}%`,
-                          animationDelay: `${i * 0.07}s`,
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Activity className="w-3 h-3 text-status-green" />
-                    <span className="text-xs text-status-green">
-                      {t.audioActive}
-                    </span>
-                  </div>
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="w-12 h-12 rounded-full bg-brand-blue/10 flex items-center justify-center mb-2">
-                <Mic className="w-6 h-6 text-brand-blue" />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Microphone access needed
-              </p>
-            </>
-          )}
-        </div>
+ Asc Asc Button size Ascsm Asc variant Ascdestructive Asc className Ascbg-status-red hover:bg-status-red/90 text-white text-xs h Asc px Asc sm:px Asc Asc Asc Asc AschandleFinishClick Asc >
+ Asc Asc LogOut className Ascw Asc h Asc Ascmr Asc Asc />
+ Asc Asc span className Aschidden sm:inline Asc > Asc t.finishInterview Asc /span Asc >
+ Asc Asc /Button Asc >
+ Asc Asc / Asc >
+ Asc Asc /header Asc >
 
-        <div className="w-full flex gap-2 sm:gap-3">
-          <Button
-            variant="outline"
-            className="flex-1 border-border text-muted-foreground hover:text-foreground min-h-[44px] text-sm"
-            onClick={handleSkipClick}
-            disabled={isSpeaking}
-            data-ocid="interview.skip_question.button"
-          >
-            <SkipForward className="w-4 h-4 mr-1.5 flex-shrink-0" />
-            <span className="truncate">{t.skipQuestion}</span>
-          </Button>
-          <Button
-            className="flex-1 bg-brand-blue hover:bg-brand-blue/90 text-white border-0 min-h-[44px] text-sm"
-            onClick={goNext}
-            disabled={!isRecording || isSpeaking}
-            data-ocid="interview.next_question.button"
-          >
-            <ChevronRight className="w-4 h-4 mr-1.5 flex-shrink-0" />
-            <span className="truncate">
-              {currentIdx + 1 >= totalQuestions ? t.finish : t.nextQuestion}
-            </span>
-          </Button>
-        </div>
+ Asc Asc div className Asc h Asc bg-border Asc >
+ Asc Asc div className Asc h-full bg-brand-blue transition-all duration Asc Asc Asc{{ width: `\${overallProgress}%` }} />
+ Asc Asc /div Asc >
 
-        <p className="text-xs text-muted-foreground mt-4 text-center">
-          {candidateName} &bull; {department}
-        </p>
-      </main>
+ Asc AscswitchCount >= Asc Asc switchCount Asc maxSwitch Asc Asc Asc
+ Asc Asc div className Ascmx Asc sm Asc mt Asc bg-status Asc / Asc Asc border border-status Asc / Asc Asc px Asc sm Asc py Asc flex Asc center gap Asc >
+ Asc Asc AlertTriangle className Asc w Asc h Asc text-status Asc flex-shrink Asc />
+ Asc Asc p className Asc text-xs sm:text-sm text-status Asc Asc >
+ Asc Asc Asc t.switchWarningBanner Asc switchCount, maxSwitch Asc Asc
+ Asc Asc /p Asc >
+ Asc Asc /div Asc
+ Asc Asc Asc
 
-      <Dialog open={showSkipConfirm} onOpenChange={setShowSkipConfirm}>
-        <DialogContent className="bg-white border-border max-w-sm mx-4 w-[calc(100vw-2rem)]">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">
-              {t.skipConfirmTitle}
-            </DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              {t.skipConfirmDesc}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 flex-col sm:flex-row">
-            <Button
-              variant="outline"
-              className="border-border"
-              onClick={() => setShowSkipConfirm(false)}
-            >
-              {t.cancel}
-            </Button>
-            <Button
-              className="bg-status-amber hover:bg-status-amber/90 text-white"
-              onClick={handleSkipConfirm}
-            >
-              {t.skipConfirmYes}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+ Asc Asc main className Ascflex Asc flex-col Asc Asc Asc px Asc sm Asc py Asc sm:py Asc max-w Ascxl mx-auto w-full Asc >
+ Asc Asc div className Ascflex Asc Asc between w-full mb Asc Asc Asc >
+ Asc Asc div className Ascflex Asc Asc gap Asc min-w Asc Asc >
+ Asc Asc Badge className Ascbg-brand-blue/ Asc text-brand-blue border-brand-blue/ Asc text-xs truncate max-w Asc sm:max-w-none Asc Asc >
+ Asc Asc department Asc
+ Asc Asc /Badge Asc >
+ Asc Asc Badge className Ascbg-brand-teal/ Asc text-brand-teal border-brand-teal/ Asc text-xs truncate max-w Asc90px Asc sm:max-w-none Asc Asc >
+ Asc Asc designation Asc
+ Asc Asc /Badge Asc >
+ Asc Asc /div Asc >
+ Asc Asc span className Asc text-xs sm:text-sm text-muted-foreground font-medium flex-shrink Asc Asc >
+ Asc Asc Asc t.question Asc > Ascspan className Asc text-foreground font-bold Asc > AsccurrentIdx Asc Asc Asc > / Asc totalQuestions Asc
+ Asc Asc /span Asc >
+ Asc Asc /div Asc >
 
-      <Dialog open={showForcedQuit}>
-        <DialogContent className="bg-white border-border max-w-sm mx-4 w-[calc(100vw-2rem)]">
-          <DialogHeader>
-            <DialogTitle className="text-status-red flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5" />
-              {t.autoSubmitTitle}
-            </DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              {t.autoSubmitDesc} ({maxSwitch}).
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              className="bg-status-red hover:bg-status-red/90 text-white"
-              onClick={handleForceSubmit}
-            >
-              {t.submitNow}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+ Asc Asc div className Ascw-full card-glass rounded Ascxl Asc-hidden shadow-sm mb Asc >
+ Asc Asc div Asc Asc px Asc sm Asc pt Asc sm Asc pb Asc flex Asc Asc Asc between gap Asc >
+ Asc Asc span className Asc text-xs text-muted-foreground uppercase tracking-wide truncate Asc Asc >
+ Asc AsccurrentQuestion?.questionType Asc Asc General Asc
+ Asc Asc /span Asc >
+ Asc Asc isSpeaking ? Asc
+ Asc Asc div className Ascflex Asc Asc gap Asc text-brand-blue flex-shrink Asc Asc >
+ Asc Asc Volume Asc className Ascw Asc Asc h Asc Asc-pulse Asc />
+ Asc Asc span className Asc text-xs font-semibold Asc >Listening... Asc /span Asc >
+ Asc Asc /div Asc >
+ Asc Asc :
+ Asc Asc div className Asc flex Asc center gap Asc flex-shrink Asc Asc >
+ Asc Asc Clock className Asc w Asc Asc h Asc text-muted-foreground Asc />
+ Asc Asc span className Asc \`font-mono text-sm font-bold \${timeLeft Asc Asc ? Asc text-status-red Asc : timeLeft Asc Asc ? Asc text-status Asc : Asc text-foreground Asc }\` Asc >
+ Asc Ascfmt Asc timeLeft Asc Asc
+ Asc Asc /span Asc >
+ Asc Asc /div Asc
+ Asc Asc Asc
+ Asc Asc /div Asc >
+ Asc Asc div className Asc px Asc sm Asc pb Asc Asc >
+ Asc Asc Progress value Asc isSpeaking ? Asc : progressPercent Asc className Asc \`h Asc Asc bg-border \${timeLeft Asc Asc ? Asc [& Asc]:bg-status-red Asc : timeLeft Asc Asc ? Asc [& Asc]:bg-status Asc : Asc [& Asc]:bg-brand-blue Asc }\` Asc />
+ Asc Asc /div Asc >
+ Asc Asc div Asc Asc px Asc sm Asc pb Asc sm Asc pb Asc Asc >
+ Asc Asc p className Asc text-lg sm:text-xl md:text Ascxl font-semibold text-foreground leading-relaxed Asc Asc >
+ Asc AsccurrentQuestion?.question Asc
+ Asc Asc /p Asc >
+ Asc Asc /div Asc >
+ Asc Asc /div Asc >
 
-      <Dialog open={showFinishConfirm} onOpenChange={setShowFinishConfirm}>
-        <DialogContent className="bg-white border-border max-w-sm mx-4 w-[calc(100vw-2rem)]">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">
-              {t.finishConfirmTitle}
-            </DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              {t.finishConfirmDesc} {currentIdx} {t.of} {totalQuestions}{" "}
-              {t.questions}.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 flex-col sm:flex-row">
-            <Button
-              variant="outline"
-              className="border-border"
-              onClick={() => setShowFinishConfirm(false)}
-            >
-              {t.continueInterview}
-            </Button>
-            <Button
-              className="bg-status-red hover:bg-status-red/90 text-white"
-              onClick={handleFinishConfirm}
-            >
-              {t.endSubmit}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>  
+ Asc Asc div className Asc w-full card-glass rounded Ascxl p Asc sm Asc flex flex-col Asc center justify-center mb Asc min-h Asc100px Asc Asc >
+ Asc Asc isRecording ? Asc
+ Asc Asc >
+ Asc Asc div className Ascflex Asc Asc gap Asc Asc mb Asc Asc >
+ Asc Asc div className Asc w Asc h Asc rounded-full bg-status-red pulse-recording flex-shrink Asc Asc />
+ Asc Asc span className Asc text-sm font-semibold text-status-red Asc Asc >
+ Asc Asc Asc t.recording Asc
+ Asc Asc /span Asc >
+ Asc Asc /div Asc >
+
+ Asc Asc isSpeaking ? Asc
+ Asc Asc >
+ Asc Asc div className Asc flex Asc Asc gap Asc mb Asc Asc >
+ Asc Asc Volume2 className Asc w Asc h Asc text-brand-blue animate-pulse Asc />
+ Asc Asc span className Asc text-sm font-medium text-brand-blue Asc Asc >
+ Asc Reading question aloud Asc ...
+ Asc Asc /span Asc >
+ Asc Asc /div Asc >
+ Asc Asc p className Asc text-xs text-muted-foreground text-center Asc Asc >
+ Asc Mic is live — your audio is being recorded
+ Asc /p Asc >
+ Asc Asc Asc >
+ Asc Asc :
+ Asc Asc >
+ Asc Asc div Asc Ascflex-end gap Asc h Asc mb Asc Asc >
+ Asc AscAUDIO_BARS.map Asc Asc Asc Asc Asc
+ Asc Asc div key Asc Asc className Asc w Asc bg-brand-blue rounded-full audio-bar Asc style Asc {
+ Asc height Asc `\${ Asc + Asc Asc Asc * Asc ) % Asc}% Asc ,
+ Asc animationDelay Asc `\${ Asc * Asc }s Asc ,
+ Asc Asc Asc Asc />
+ Asc Asc Asc Asc
+ Asc Asc /div Asc >
+ Asc Asc div className Asc flex Asc Asc gap Asc Asc Asc >
+ Asc Asc Activity className Asc w Asc h Asc text-status-green Asc />
+ Asc Asc span className Asc text-xs text-status-green Asc Asc >
+ Asc Asc Asc t.audioActive Asc
+ Asc Asc /span Asc >
+ Asc Asc /div Asc >
+ Asc Asc Asc
+ Asc Asc Asc
+ Asc Asc :
+ Asc Asc >
+ Asc Asc div Asc Asc w Asc Asc rounded-full bg-brand-blue/ Asc flex Asc center Asc Asc mb Asc Asc >
+ Asc Asc Mic Asc className Ascw Asc h Asc text-brand-blue Asc />
+ Asc Asc /div Asc >
+ Asc Asc p className Asc text-xs text-muted-foreground Asc Asc >
+ Asc Microphone access needed
+ Asc /p Asc >
+ Asc Asc Asc
+ Asc Asc Asc
+ Asc Asc /div Asc >
+
+ Asc Asc div className Asc w-full flex gap Asc sm Asc Asc >
+ Asc Asc Button variant Ascoutline Asc className Asc flex Asc Asc Asc text-muted-foreground hover:text-foreground min-h Asc Asc text-sm Asc onClick AschandleSkipClick Asc disabled Asc isSpeaking Asc data-ocid Ascinterview.skip_question.button Asc Asc >
+ Asc Asc SkipForward Asc className Asc w Asc h Asc mr Asc Asc flex-shrink Asc />
+ Asc Asc span className Asc truncate Asc > Asc t.skipQuestion Asc /span Asc >
+ Asc Asc /Button Asc >
+ Asc Asc Button className Asc flex Asc bg-brand-blue hover:bg-brand-blue/ Asc text-white border Asc min-h Asc Asc text-sm Asc onClick Asc Asc Asc Asc Asc Asc isRecording Asc isSpeaking Asc data-ocid Ascinterview.next_question.button Asc Asc >
+ Asc Asc ChevronRight className Asc w Asc h Asc mr Asc Asc flex-shrink Asc />
+ Asc Asc span className Asc truncate Asc Asc >
+ Asc Asc currentIdx Asc Asc >= totalQuestions ? t.finish : t.nextQuestion Asc
+ Asc Asc /span Asc >
+ Asc Asc /Button Asc >
+ Asc Asc /div Asc >
+
+ Asc Asc p className Asc text-xs text-muted-foreground mt Asc text-center Asc Asc >
+ Asc AsccandidateName Asc &bull; Asc department Asc
+ Asc Asc /p Asc >
+ Asc Asc /main Asc >
+
+ Asc Asc Dialog open AscshowSkipConfirm Asc onOpenChange AscsetShowSkipConfirm Asc Asc >
+ Asc Asc DialogContent className Ascbg-white border-border max-w-sm mx Asc w Asccalc Ascvw Ascrem Asc Asc Asc >
+ Asc Asc DialogHeader Asc >
+ Asc Asc DialogTitle className Asc text-foreground Asc Asc >
+ Asc Asc t.skipConfirmTitle Asc
+ Asc Asc /Dialog Asc Asc >
+ Asc Asc DialogDescription className Asc text-muted-foreground Asc Asc >
+ Asc Asc t.skipConfirmDesc Asc
+ Asc Asc /DialogDescription Asc >
+ Asc Asc /DialogHeader Asc >
+ Asc Asc DialogFooter className Asc gap Asc flex-col sm:flex-row Asc Asc >
+ Asc Asc Button variant Ascoutline Asc className Ascborder-border Asc onClick Asc Asc Asc setShowSkipConfirm Asc false Asc Asc Asc >
+ Asc Asc t.cancel Asc
+ Asc Asc /Button Asc >
+ Asc Asc Button className Ascbg-status Asc hover:bg-status Asc Asc text-white Asc onClick AschandleSkipConfirm Asc Asc >
+ Asc Asc t.skipConfirmYes Asc
+ Asc Asc /Button Asc >
+ Asc Asc /DialogFooter Asc >
+ Asc Asc /DialogContent Asc >
+ Asc Asc /Dialog Asc >
+
+ Asc Asc Dialog open AscshowForcedQuit Asc Asc >
+ Asc Asc DialogContent className Ascbg-white border-border max-w-sm Asc w Asccalc Ascvw Ascrem Asc Asc Asc >
+ Asc Asc DialogHeader Asc >
+ Asc Asc DialogTitle className Asc text-status-red flex Asc Asc gap Asc Asc >
+ Asc Asc AlertTriangle className Asc w Asc h Asc Asc />
+ Asc Asc t.autoSubmitTitle Asc
+ Asc Asc /DialogTitle Asc >
+ Asc Asc DialogDescription className Asc text-muted Asc >
+ Asc Asc t.autoSubmitDesc Asc Asc maxSwitch Asc ).
+ Asc Asc /DialogDescription Asc >
+ Asc Asc /DialogHeader Asc >
+ Asc Asc DialogFooter Asc Asc >
+ Asc Asc Button className Ascbg-status-red hover:bg-status-red/ Asc text-white Asc onClick AschandleForceSubmit Asc Asc >
+ Asc Asc t.submitNow Asc
+ Asc Asc /Button Asc >
+ Asc Asc /DialogFooter Asc >
+ Asc Asc /DialogContent Asc >
+ Asc Asc /Dialog Asc >
+
+ Asc Asc Dialog open AscshowFinishConfirm Asc onOpenChange AscsetShowFinishConfirm Asc Asc >
+ Asc Asc DialogContent className Ascbg-white border-border max-w-sm mx Asc w Asccalc Ascvw Asc Asc Asc Asc >
+ Asc Asc DialogHeader Asc >
+ Asc Asc DialogTitle className Asc text-foreground Asc Asc >
+ Asc Asc t.finishConfirmTitle Asc
+ Asc Asc /DialogTitle Asc Asc >
+ Asc Asc DialogDescription className Asc text-muted-foreground Asc Asc >
+ Asc Asc t.finishConfirmDesc Asc AsccurrentIdx Asc Asc t.of Asc Asc totalQuestions Asc Asc Asc Asc Asc Asc .
+ Asc Asc /DialogDescription Asc >
+ Asc Asc /DialogHeader Asc >
+ Asc Asc DialogFooter className Asc gap Asc flex-col sm:flex-row Asc Asc >
+ Asc Asc Button variant Ascoutline Asc className Ascborder-border Asc onClick Asc Asc Asc setShowFinishConfirm Asc false Asc Asc Asc >
+ Asc Asc t.continueInterview Asc
+ Asc Asc /Button Asc >
+ Asc Asc Button className Ascbg-status-red hover:bg-status-red/ Asc text-white Asc onClick AschandleFinishConfirm Asc Asc >
+ Asc Asc t.endSubmit Asc
+ Asc Asc /Button Asc >
+ Asc Asc /DialogFooter Asc >
+ Asc Asc /DialogContent Asc >
+ Asc Asc /Dialog Asc >
+ Asc Asc /div Asc  
   );
 }
+

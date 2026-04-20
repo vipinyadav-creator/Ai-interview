@@ -87,10 +87,14 @@ export async function initInterview(
 }
 
 export async function ttsSynthesize(
-  _text: string,
-  _token: string,
+  text: string,
+  lang: string,
 ): Promise<{ audioBase64: string }> {
-  return { audioBase64: "" };
+  const res = await post<{ success: boolean; audioBase64: string; message?: string }>("tts", { text, lang });
+  if (!res.success) {
+    throw new Error(res.message || "TTS synthesis failed");
+  }
+  return { audioBase64: res.audioBase64 };
 }
 
 export async function startResumableUpload(

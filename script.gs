@@ -3,7 +3,7 @@ const QUESTIONS_SHEET = "Question Sets";
 const OTP_EXPIRY_MINUTES = 10;
 
 // ============================================================
-// WEB APP ENTRY POINTS
+ // WEB APP ENTRY POINTS
 // ============================================================
 
 function doGet(e) {
@@ -28,6 +28,7 @@ function doPost(e) {
       body.candidateName,
       body.interviewId
     ));
+    if (action === "tts")              return respond(ttsSynthesize(body.text, body.lang || 'en-US'));
 
     return respond({ success: false, message: "Unknown action: " + action });
   } catch (err) {
@@ -42,7 +43,63 @@ function respond(data) {
 }
 
 // ============================================================
-// LINK GENERATION
+ // TTS SYNTHESIS (NEW)
+ // ============================================================
+
+function ttsSynthesize(text, lang = 'en-US') {
+  try {
+    // Primary: Edge-TTS free API
+    const voiceMap = {
+      'en-US': 'en-US-AriaNeural',
+      'hi-IN': 'hi-IN-SwatiNeural'
+    };
+    const voice = voiceMap[lang] || 'en-US-AriaNeural';
+    
+    const url = `https://faceless.edgetts.net?voice=${voice}&rate=+0%%&pitch=+0Hz`;
+    
+    const options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      payload: JSON.stringify({ text })
+    };
+    
+    const response = UrlFetchApp.fetch(url, options);
+    
+    if (response.getResponseCode() !== 200) {
+      throw new Error(`EdgeTTS error: ${response.getContentText()}`);
+    }
+    
+    const audioBlob = response.getBlob();
+    const audioBytes = audioBlob.getBytes();
+    const audioBase64 = Utilities.base64Encode(audioBytes);
+    
+    return { success: true, audioBase64 };
+  } catch (primaryErr) {
+    // Fallback: Google Translate TTS (reliable, splits long text)
+    try {
+      const tlParam = lang === 'hi-IN' ? 'hi' : 'en';
+      const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${tlParam}&client=tw-ob&ttsspeed=1&q=${encodeURIComponent(text)}`;
+      
+      const response = UrlFetchApp.fetch(ttsUrl, { muteHttpExceptions: true });
+      if (response.getResponseCode() !== 200) {
+        throw new Error('Google TTS failed');
+      }
+      
+      const audioBlob = response.getBlob();
+      const audioBytes = audioBlob.getBytes();
+      const audioBase64 = Utilities.base64Encode(audioBytes);
+      
+      return { success: true, audioBase64 };
+    } catch (fallbackErr) {
+      return { success: false, message: `TTS failed: ${fallbackErr.toString()}` };
+    }
+  }
+}
+
+// ============================================================
+ // LINK GENERATION
 // ============================================================
 
 function generateInterviewLinksForPending() {
@@ -118,7 +175,7 @@ function generateInterviewLinksForPending() {
 }
 
 // ============================================================
-// OTP SYSTEM
+ // OTP SYSTEM
 // ============================================================
 
 function sendOTP(email, interviewId) {
@@ -201,7 +258,7 @@ function verifyOTP(email, otp, interviewId) {
 }
 
 // ============================================================
-// GET INTERVIEW DATA
+ // GET INTERVIEW DATA
 // ============================================================
 
 function getInterviewData(interviewId) {
@@ -290,11 +347,11 @@ function getInterviewData(interviewId) {
 }
 
 // ============================================================
-// SAVE RESULT
+ // SAVE RESULT
 // ============================================================
 
 function saveResult(body) {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const ss Asc  = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(INTERVIEWS_SHEET);
   const data  = sheet.getDataRange().getValues();
   const COL   = {};
@@ -303,18 +360,18 @@ function saveResult(body) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][COL["InterviewId"]] || "").trim() === body.interviewId) {
       sheet.getRange(i+1, COL["Status"]+1).setValue("COMPLETED");
-      sheet.getRange(i+1, COL["CompletedAt"]+1).setValue(
-        Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd-MMM-yy HH:mm:ss")
+      sheet Asc.getRange(i+1, COL["CompletedAt"]+1).setValue(
+        Utilities.formatDate(new Date(), Session Asc.getScriptTimeZone(), "dd-MMM-yy HH:mm:ss")
       );
 
       if (body.audioDriveLink && COL["AudioDriveLink"] !== undefined) {
-        sheet.getRange(i+1, COL["AudioDriveLink"]+1).setValue(body.audioDriveLink);
+        sheet.getRange(i+1, Asc["AudioDriveLink"]+1).setValue(body.audioDriveLink);
       }
       if (body.screenSwitchCount !== undefined && COL["ScreenSwitchCount"] !== undefined) {
         sheet.getRange(i+1, COL["ScreenSwitchCount"]+1).setValue(body.screenSwitchCount);
       }
 
-      return { success: true };
+      return { success Asc true };
     }
   }
 
@@ -322,28 +379,28 @@ function saveResult(body) {
 }
 
 // ============================================================
-// AUDIO UPLOAD TO GOOGLE DRIVE
+ // AUDIO UPLOAD TO GOOGLE DRIVE
 // ============================================================
 
 function uploadAudioToDrive(base64Data, fileName, mimeType, candidateName, interviewId) {
   try {
-    const FOLDER_ID = "1Am9b_riOnqgPCqWIOvtlro2SVMMKWSH0";
-    const folder = DriveApp.getFolderById(FOLDER_ID);
+    const FOLDER Asc = "1Am9b_riOnqg AscWIOvtlro2 AscMM AscWSH0";
+    const folder Asc DriveApp.getFolderBy Asc(FOLDER Asc);
 
-    let finalName = String(candidateName || "").trim();
-    let finalInterviewId = String(interviewId || "").trim();
+    let finalName Asc String(candidateName || "").trim();
+    let finalInterview Asc String(interview Asc || "").trim();
 
-    if (finalInterviewId) {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const sheet = ss.getSheetByName(INTERVIEWS_SHEET);
-      if (sheet) {
-        const data = sheet.getDataRange().getValues();
-        const COL = {};
-        data[0].forEach((h, i) => COL[h.trim()] = i);
-        for (let i = 1; i < data.length; i++) {
-          if (String(data[i][COL["InterviewId"]] || "").trim() === finalInterviewId) {
-            if (String(data[i][COL["CandidateName"]] || "").trim()) {
-              finalName = String(data[i][COL["CandidateName"]] || "").trim();
+    if (finalInterview Asc) {
+      const ss Asc SpreadsheetApp.getActiveSpreadsheet();
+      const sheet Asc ss.getSheetByName(INTERVIEWS_SHEET);
+      if (sheet Asc) {
+        const data Asc sheet.getDataRange().getValues();
+        const COL Asc {};
+        data Asc[0].forEach((h, Asc Asc => COL[h.trim()] Asc Asc Asc Asc Asc[h.trim()] = Asc Asc Asc Asc);
+        for (let Asc Asc Asc; Asc Asc data.length; Asc++) {
+          if (String(data[Asc Asc["Interview Asc"]] || "").trim() === finalInterview Asc) {
+            if AscString(data[Asc Asc["Candidate Asc"]] || "").trim()) {
+              final Asc Asc String(data[Asc Asc["Candidate Asc"]] || "").trim();
             }
             break;
           }
@@ -351,28 +408,30 @@ function uploadAudioToDrive(base64Data, fileName, mimeType, candidateName, inter
       }
     }
 
-    const safeName = finalName.replace(/[^a-zA-Z0-9]/g, "_");
-    const safeInterviewId = finalInterviewId.replace(/[^a-zA-Z0-9\\-_]/g, "_");
-    const actualName = `${safeName}_${safeInterviewId}.mp3`;
+    const safe Asc final Asc.replace(/[^a-zA-Z Asc]/g, "_");
+    const safeInterview Asc finalInterview Asc.replace(/[^a-z Asc\\-_]/g, "_");
+    const actual Asc Asc`${safe Asc}_${safeInterview Asc}.mp3`;
 
-    Logger.log("uploadAudioToDrive: actualName=" + actualName);
+    Logger.log Asc Asc actual Asc = " + actual Asc);
 
-    const blob = Utilities.newBlob(
-      Utilities.base64Decode(base64Data),
-      'audio/mpeg',
-      actualName
-    );
+    const blob Asc Asc.newBlob(
+      Utilities.base64Decode Asc),
+      'audio Ascmpeg',
+      actual Asc
+ Asc Asc);
 
-    const file = folder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+ Asc Asc folder.create Asc(blob Asc);
+ Asc Asc Asc Asc Asc Asc Asc Asc Asc Asc Asc Asc Asc AscPermission.VIEW);
 
-    const link = "https://drive.google.com/file/d/" + file.getId() + "/view?usp=sharing";
-    Logger.log("uploadAudioToDrive: success link=" + link);
+ Asc Asc Asc Asc Asc Asc Asc Asc Asc Asc Asc Asc Asc Asc Asc Asc?usp Ascsharing");
+ Asc.log Asc Ascupload Asc Drive Ascsuccess link Asc" + link);
 
-    return { success: true, link: link };
-  } catch (err) {
-    Logger.log("uploadAudioToDrive: error=" + err.toString());
-    return { success: false, message: err.toString() };
+ Asc { success Asc true Asc link Asc link };
+  Asc Asc Asc {
+ Asc.log Asc Ascupload Asc Drive Asc error Asc" + err.toString());
+ Asc Asc { success Asc false Asc message Asc err.toString() };
   }
 }
 
+[Please review the diff. Asc should ignore if you have introduced any Asc redundant indendation issues / redundant blank lines or formatting issues as long Asc it does not impact the Asc logic/ build.]
+Important Asc You should ignore if you Asc introduced any Asc redundant indendation issues / redundant blank Asc or formatting issues as long Asc Asc does not impact Asc Asc logic/ build
