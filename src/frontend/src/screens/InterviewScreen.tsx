@@ -100,7 +100,6 @@ export default function InterviewScreen() {
           setShowForcedQuit(true);
         } else {
           const remaining = maxSwitch - next;
-          // FIXED: Use tabSwitchWarning instead of switchWarning
           toast.warning(t.tabSwitchWarning(remaining));
         }
         return next;
@@ -117,7 +116,7 @@ export default function InterviewScreen() {
     };
   }, [maxSwitch, t]);
 
-  // --- Timer logic FIXED ---
+  // --- Timer logic ---
   const startTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     setTimeLeft(QUESTION_DURATION);
@@ -132,6 +131,7 @@ export default function InterviewScreen() {
     }
   }, [timeLeft]);
 
+  // --- Natural TTS Audio Logic ---
   const speakQuestion = useCallback(
     (text: string, idx: number, onDone: () => void) => {
       if (!window.speechSynthesis) {
@@ -149,24 +149,24 @@ export default function InterviewScreen() {
 
       const setBestVoice = () => {
         const voices = window.speechSynthesis.getVoices();
-        // FIXED: Explicitly allow SpeechSynthesisVoice or undefined
         let bestVoice: SpeechSynthesisVoice | undefined = undefined;
 
+        // FIXED: Human-like voice selection logic
         if (lang === "hi") {
           bestVoice =
-            voices.find((v) => v.name.includes("Google") && v.lang === "hi-IN") ||
-            voices.find((v) => v.name.includes("Microsoft") && v.lang === "hi-IN") ||
-            voices.find((v) => v.lang === "hi-IN");
-          utterance.lang = "hi-IN";
+            voices.find((v) => v.name.includes("Google") && v.lang.includes("hi")) ||
+            voices.find((v) => v.name.includes("Natural") && v.lang.includes("hi")) ||
+            voices.find((v) => v.lang.includes("hi"));
         } else {
           bestVoice =
-            voices.find((v) => v.name.includes("Google") && v.lang === "en-IN") ||
-            voices.find((v) => v.name.includes("Microsoft") && v.lang === "en-IN") ||
-            voices.find((v) => v.lang === "en-IN");
-          utterance.lang = "en-IN";
+            voices.find((v) => v.name.includes("Google") && v.lang.includes("en")) ||
+            voices.find((v) => v.name.toLowerCase().includes("natural") && v.lang.includes("en")) ||
+            voices.find((v) => v.name.includes("Microsoft") && v.lang.includes("en")) ||
+            voices.find((v) => v.lang.includes("en"));
         }
+        
         if (bestVoice) utterance.voice = bestVoice;
-        utterance.rate = 0.9;
+        utterance.rate = 0.95; // Natural human speed
         utterance.pitch = 1.0;
         utterance.volume = 1;
 
@@ -217,6 +217,7 @@ export default function InterviewScreen() {
     [stopTtsKeepAlive, stopTtsFallback, lang],
   );
 
+  // --- Mic & Recording Logic ---
   useEffect(() => {
     if (recordingStarted.current) return;
     recordingStarted.current = true;
@@ -250,7 +251,6 @@ export default function InterviewScreen() {
         }
         streamRef.current = micStream;
 
-        // FIXED: More robust mimeType fallback for cross-browser compatibility
         const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
           ? "audio/webm;codecs=opus"
           : MediaRecorder.isTypeSupported("audio/mp4")
@@ -259,7 +259,8 @@ export default function InterviewScreen() {
               ? "audio/aac"
               : ""; 
 
-        const mrOptions = mimeType ? { mimeType, audioBitsPerSecond: 96000 } : { audioBitsPerSecond: 96000 };
+        // FIXED: 48000 bps for clear audio without lag
+        const mrOptions = mimeType ? { mimeType, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 48000 };
         const mr = new MediaRecorder(micStream, mrOptions);
         
         mr.ondataavailable = (e) => {
@@ -276,6 +277,8 @@ export default function InterviewScreen() {
         mediaRecorderRef.current = mr;
         setIsRecording(true);
         spokenIdxRef.current = 0;
+        
+        // Starts the 1st question reading
         speakQuestion(questions[0]?.question || "", 1, () => startTimer());
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
@@ -292,9 +295,14 @@ export default function InterviewScreen() {
     })();
   }, [preparedMicStream, questions, speakQuestion, startTimer, t]);
 
+  // --- Duplicate reading prevention ---
   useEffect(() => {
+    // FIXED: Prevent double-reading of the first question
+    if (currentIdx === 0) return; 
+    
     if (spokenIdxRef.current === currentIdx) return;
     spokenIdxRef.current = currentIdx;
+    
     speakQuestion(questions[currentIdx]?.question || "", currentIdx + 1, () =>
       startTimer(),
     );
@@ -348,7 +356,6 @@ export default function InterviewScreen() {
     [setState, stopStream, stopTtsKeepAlive, stopTtsFallback],
   );
 
-  // FIXED: Cleanup fallback and main timer on unmount
   useEffect(() => {
     return () => {
       stopTtsFallback();
@@ -708,6 +715,6 @@ export default function InterviewScreen() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </div>  
   );
 }
