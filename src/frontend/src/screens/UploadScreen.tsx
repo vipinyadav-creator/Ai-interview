@@ -13,13 +13,8 @@ import { useApp } from "../AppContext";
 import { useLang } from "../LanguageContext";
 import {
   finalizeInterview,
-  startResumableUpload,
-  uploadAudioToDrive,
-  uploadChunk,
 } from "../api";
-import { convertAudioBlobToMp3, getAudioExtension } from "../utils/audio";
-
-const CHUNK_SIZE = 512 * 1024; // 512 KB
+import { convertAndUploadAudio, checkMP3ServiceHealth } from "../utils/mp3-upload";
 
 type Step = "preparing" | "uploading" | "finalizing" | "complete" | "error";
 
@@ -66,54 +61,30 @@ export default function UploadScreen() {
       setStep("preparing");
       setProgress(5);
 
-      const audioBlob = await convertAudioBlobToMp3(blob);
-      setProgress(15);
-
-      const actualMimeType = audioBlob.type || "audio/webm";
-      const extension = getAudioExtension(actualMimeType);
-      const fileName = `${state.candidateName.replace(/\s+/g, "_")}_${state.interviewId}.${extension}`;
-
-      try {
-        const driveRes = await uploadAudioToDrive(
-          audioBlob,
-          fileName,
-          actualMimeType,
-          state.candidateName,
-          state.interviewId,
-        );
-
-        if (driveRes.success && driveRes.link) {
-          driveLink = driveRes.link;
-          setAudioLink(driveLink);
-        } else {
-          throw new Error(
-            driveRes.message || "Google Drive rejected the upload.",
-          );
-        }
-      } catch (err) {
-        // INTERNET FAIL DURING UPLOAD (English)
-        if (!navigator.onLine)
-          throw new Error(
-            "Internet disconnected during upload. Please fix your connection and do not refresh the page.",
-          );
-        throw err;
+      // Check MP3 service health
+      const serviceHealthy = await checkMP3ServiceHealth();
+      if (!serviceHealthy) {
+        throw new Error("MP3 conversion service is currently unavailable. Please try again in a moment.");
       }
+      setProgress(10);
 
-      const { uploadId } = await startResumableUpload(
-        state.interviewId,
-        state.token,
-        fileName,
-        audioBlob.size,
-      );
-      setStep("uploading");
+      // Convert WebM to MP3 and upload to Drive in one step
+      const uploadResult = await convertAndUploadAudio(blob, {
+        candidateName: state.candidateName,
+        interviewId: state.interviewId,
+        onProgress: (progress) => {
+          // Map 0-100 progress to 15-90 on the screen
+          setProgress(15 + (progress * 0.75));
+        },
+      });
 
-      const totalChunks = Math.ceil(audioBlob.size / CHUNK_SIZE);
-      for (let i = 0; i < totalChunks; i++) {
-        const start = i * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, audioBlob.size);
-        const chunk = audioBlob.slice(start, end);
-        await uploadChunk(uploadId, chunk, i, totalChunks);
-        setProgress(Math.round(((i + 1) / totalChunks) * 70) + 20);
+      if (uploadResult.success && uploadResult.link) {
+        driveLink = uploadResult.link;
+        setAudioLink(driveLink);
+      } else {
+        throw new Error(
+          uploadResult.link ? "Upload completed with warnings" : "Audio upload failed",
+        );
       }
 
       setStep("finalizing");

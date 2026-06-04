@@ -120,23 +120,6 @@ export async function uploadChunk(
   return { success: true, progress: 100 };
 }
 
-export async function uploadAudioToDrive(
-  audioBlob: Blob,
-  fileName: string,
-  mimeType: string,
-  candidateName: string,
-  interviewId: string,
-): Promise<{ success: boolean; link: string; message?: string }> {
-  const base64 = await blobToBase64(audioBlob);
-  return post("uploadAudio", {
-    base64Data: base64,
-    fileName,
-    mimeType: mimeType || audioBlob.type || "audio/webm",
-    candidateName,
-    interviewId,
-  });
-}
-
 export async function finalizeInterview(
   interviewId: string,
   _token: string,
@@ -151,16 +134,4 @@ export async function finalizeInterview(
     status: "COMPLETED",
   });
   return { success: res.success, audioLink: audioDriveLink || "" };
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.split(",")[1]);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
 }

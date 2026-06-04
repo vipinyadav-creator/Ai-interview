@@ -26,7 +26,7 @@ import { toast } from "sonner";
 import { useApp } from "../AppContext";
 import { useLang } from "../LanguageContext";
 import { ttsSynthesize } from "../api";
-import { convertAudioBlobToMp3, warmAudioConversion } from "../utils/audio";
+import { warmAudioConversion } from "../utils/audio";
 
 declare global {
   interface Window {
@@ -102,11 +102,21 @@ export default function InterviewScreen() {
     stream.getTracks().forEach((track) => track.stop());
   }, []);
 
-  const cleanupAudioGraph = useCallback(() => {
+  const cleanupCurrentTts = useCallback(() => {
     if (ttsSourceRef.current) {
       ttsSourceRef.current.disconnect();
       ttsSourceRef.current = null;
     }
+    if (ttsAudioRef.current) {
+      ttsAudioRef.current.pause();
+      ttsAudioRef.current.src = "";
+      ttsAudioRef.current = null;
+    }
+  }, []);
+
+  const cleanupRecordingGraph = useCallback(() => {
+    cleanupCurrentTts();
+
     if (micSourceRef.current) {
       micSourceRef.current.disconnect();
       micSourceRef.current = null;
@@ -115,16 +125,11 @@ export default function InterviewScreen() {
       destinationRef.current.disconnect();
       destinationRef.current = null;
     }
-    if (ttsAudioRef.current) {
-      ttsAudioRef.current.pause();
-      ttsAudioRef.current.src = "";
-      ttsAudioRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state === "running") {
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
       audioContextRef.current.close();
       audioContextRef.current = null;
     }
-  }, []);
+  }, [cleanupCurrentTts]);
 
   // --- Screen switch tracking ---
   useEffect(() => {
@@ -181,7 +186,10 @@ export default function InterviewScreen() {
         const { audioBase64 } = await ttsSynthesize(text, lang === "hi" ? "hi-IN" : "en-US");
         const audioUrl = `data:audio/mp3;base64,${audioBase64}`;
 
-        // Setup AudioContext graph if not exists
+        cleanupCurrentTts();
+
+        // Setup a single recording graph for the whole interview. Restarting
+        // MediaRecorder creates separate WebM containers, which corrupts downloads.
         if (!audioContextRef.current || audioContextRef.current.state === "closed") {
           const AudioContextClass = window.AudioContext || window.webkitAudioContext;
           audioContextRef.current = new AudioContextClass({ sampleRate: 48000 });
@@ -189,17 +197,17 @@ export default function InterviewScreen() {
         
         const audioCtx = audioContextRef.current;
 
-        const destination = audioCtx.createMediaStreamDestination();
-        destinationRef.current = destination;
+        if (!destinationRef.current) {
+          destinationRef.current = audioCtx.createMediaStreamDestination();
+        }
+
+        const destination = destinationRef.current;
 
         // Mic source (already in streamRef.current)
         if (streamRef.current && !micSourceRef.current) {
           const micSource = audioCtx.createMediaStreamSource(streamRef.current);
           micSource.connect(destination);
           micSourceRef.current = micSource;
-        } else if (streamRef.current && micSourceRef.current) {
-            micSourceRef.current.disconnect();
-            micSourceRef.current.connect(destination);
         }
 
         // TTS audio
@@ -218,38 +226,37 @@ export default function InterviewScreen() {
             await audioCtx.resume();
         }
 
-        // Update MediaRecorder to use mixed stream
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-            mediaRecorderRef.current.stop();
+        if (!mediaRecorderRef.current || mediaRecorderRef.current.state === "inactive") {
+          const mixedStream = destination.stream;
+          const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") 
+              ? "audio/webm;codecs=opus" 
+              : "";
+              
+          const mr = new MediaRecorder(mixedStream, mimeType ? { mimeType, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 48000 });
+          
+          mr.ondataavailable = (e) => {
+            if (e.data.size > 0) chunksRef.current.push(e.data);
+          };
+          mr.start(1000);
+
+          mrKeepAliveRef.current = setInterval(() => {
+            if (mr.state === "paused") mr.resume();
+          }, 2000);
+          mediaRecorderRef.current = mr;
         }
-
-        const mixedStream = destination.stream;
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") 
-            ? "audio/webm;codecs=opus" 
-            : "";
-            
-        const mr = new MediaRecorder(mixedStream, mimeType ? { mimeType, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 48000 });
-        
-        mr.ondataavailable = (e) => {
-          if (e.data.size > 0) chunksRef.current.push(e.data);
-        };
-        mr.start(250);
-
-        mrKeepAliveRef.current = setInterval(() => {
-          if (mr.state === "paused") mr.resume();
-        }, 2000);
-        mediaRecorderRef.current = mr;
 
         await ttsAudioRef.current.play();
 
         // Cleanup on end
         ttsAudioRef.current.onended = () => {
           setIsSpeaking(false);
+          cleanupCurrentTts();
           onDone();
         };
 
         ttsAudioRef.current.onerror = () => {
           setIsSpeaking(false);
+          cleanupCurrentTts();
           onDone();
         };
 
@@ -257,11 +264,11 @@ export default function InterviewScreen() {
         console.error("TTS/Mixing error:", err);
         toast.error("TTS failed, starting timer");
         setIsSpeaking(false);
-        cleanupAudioGraph();
+        cleanupCurrentTts();
         onDone();
       }
     },
-    [lang, cleanupAudioGraph]
+    [lang, cleanupCurrentTts]
   );
 
   // --- Initial setup ---
@@ -327,28 +334,19 @@ export default function InterviewScreen() {
     (uids: string[], sc: number) => {
       stopTimer();
       stopMrKeepAlive();
-      cleanupAudioGraph();
+      cleanupCurrentTts();
 
       const mr = mediaRecorderRef.current;
       const doFinish = async () => {
         const recordedMimeType = mr?.mimeType || chunksRef.current[0]?.type || "audio/webm";
         const rawBlob = new Blob(chunksRef.current, { type: recordedMimeType });
-        let finalBlob = rawBlob;
         
-        if (rawBlob.size > 0) {
-          try {
-            finalBlob = await convertAudioBlobToMp3(rawBlob);
-          } catch (error) {
-            console.warn("MP3 conversion failed:", error);
-            toast.warning("MP3 conversion incomplete, using original recording.");
-          }
-        }
-        
+        cleanupRecordingGraph();
         stopStream(streamRef.current);
         
         setState({
           screen: "upload",
-          recordedBlob: finalBlob,
+          recordedBlob: rawBlob,
           preparedMicStream: null,
           selectedQuestionUIDs: uids,
           screenSwitchCount: sc,
@@ -359,21 +357,22 @@ export default function InterviewScreen() {
         mr.onstop = () => {
           void doFinish();
         };
+        mr.requestData();
         mr.stop();
       } else {
         void doFinish();
       }
     },
-    [setState, stopStream, stopMrKeepAlive, stopTimer, cleanupAudioGraph]
+    [setState, stopStream, stopMrKeepAlive, stopTimer, cleanupCurrentTts, cleanupRecordingGraph]
   );
 
   useEffect(() => {
     return () => {
       stopTimer();
       stopStream(streamRef.current);
-      cleanupAudioGraph();
+      cleanupRecordingGraph();
     };
-  }, [stopStream, stopTimer, cleanupAudioGraph]);
+  }, [stopStream, stopTimer, cleanupRecordingGraph]);
 
   const goNext = useCallback(() => {
     if (navigating.current || isSpeaking) return;
@@ -381,7 +380,6 @@ export default function InterviewScreen() {
     
     stopMrKeepAlive();
     stopTimer();
-    cleanupAudioGraph();
     setIsSpeaking(false);
 
     setCurrentIdx((idx) => {
@@ -398,7 +396,7 @@ export default function InterviewScreen() {
       }, 50);
       return next;
     });
-  }, [totalQuestions, questions, switchCount, finishInterview, stopMrKeepAlive, stopTimer, cleanupAudioGraph, isSpeaking]);
+  }, [totalQuestions, questions, switchCount, finishInterview, stopMrKeepAlive, stopTimer, isSpeaking]);
 
   goNextRef.current = goNext;
 

@@ -8,6 +8,7 @@ interface LangContextType {
   t: (typeof translations)["en"]; // Yeh assume kar raha hai ki en aur hi dono objects ka structure same hai
   lang: Language;
   setLang: (lang: Language) => void; // Future mein language change karne ke liye
+  toggleLang: () => void;
 }
 
 const LangContext = createContext<LangContextType | null>(null);
@@ -18,9 +19,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   // Jo language select hogi, uske translations automatic pick ho jayenge
   const t = translations[lang] || translations.en;
+  const toggleLang = () => setLang((current) => (current === "en" ? "hi" : "en"));
 
   return (
-    <LangContext.Provider value={{ t, lang, setLang }}>
+    <LangContext.Provider value={{ t, lang, setLang, toggleLang }}>
       {children}
     </LangContext.Provider>
   );
