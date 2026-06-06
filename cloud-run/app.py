@@ -287,17 +287,26 @@ async def convert_audio(request: ConversionRequest) -> ConversionResponse:
             with open(input_path, 'wb') as f:
                 f.write(audio_data)
             logger.info(f"Input file written: {input_path} ({input_size} bytes)")
-            
+
+            # Diagnostic: input first 16 bytes (hex)
+            try:
+                with open(input_path, 'rb') as f:
+                    head = f.read(16)
+                logger.info(f"Input first 16 bytes (hex): {head.hex()}")
+            except Exception as e:
+                logger.warning(f"Could not read input head bytes: {e}")
+
             # Validate input file
             if not validate_webm_header(input_path):
                 logger.warning("WebM header validation failed, but continuing with conversion")
-            
+
             # Convert to MP3
             if not convert_webm_to_mp3(input_path, output_path):
                 raise HTTPException(
                     status_code=500,
                     detail="FFmpeg conversion failed"
                 )
+            
             
             # Verify output file exists
             if not os.path.exists(output_path):
@@ -308,10 +317,23 @@ async def convert_audio(request: ConversionRequest) -> ConversionResponse:
             
             output_size = os.path.getsize(output_path)
             logger.info(f"Output file created: {output_path} ({output_size} bytes)")
-            
+
+            # Diagnostic: output first 16 bytes (hex)
+            try:
+                with open(output_path, 'rb') as f:
+                    head = f.read(16)
+                logger.info(f"Output first 16 bytes (hex): {head.hex()}")
+            except Exception as e:
+                logger.warning(f"Could not read output head bytes: {e}")
+
             # Verify MP3 integrity
-            if not verify_mp3_integrity(output_path):
+            integrity_ok = verify_mp3_integrity(output_path)
+            if integrity_ok:
+                logger.info("MP3 integrity verification PASSED")
+            else:
+                logger.warning("MP3 integrity verification FAILED")
                 logger.warning("MP3 integrity check failed, but continuing")
+            
             
             # Get audio duration
             duration = get_audio_duration(output_path)

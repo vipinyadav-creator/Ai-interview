@@ -111,7 +111,12 @@ export async function convertAudioBlobToMp3(
   try {
     onProgress?.(10);
     console.log(`[MP3] Starting conversion for ${candidateName} (${interviewId})`);
+    console.log(`[MP3] Input blob`, {
+      size: webmBlob.size,
+      type: webmBlob.type,
+    });
     console.log(`[MP3] Input size: ${formatBytes(webmBlob.size)}`);
+
 
     // Step 1: Encode to base64
     onProgress?.(20);
@@ -169,7 +174,23 @@ export async function convertAudioBlobToMp3(
 
     const mp3Blob = base64ToBlob(conversionResult.mp3_base64, MP3_MIME_TYPE);
 
-    console.log(`[MP3] MP3 Blob created: ${formatBytes(mp3Blob.size)}`);
+    console.log(`[MP3] MP3 Blob created:`, {
+      size: mp3Blob.size,
+      type: mp3Blob.type,
+    });
+
+    // Sanity: first bytes (may help detect if MP3 isn't actually MP3)
+    try {
+      const buf = await mp3Blob.arrayBuffer();
+      const head = Array.from(new Uint8Array(buf.slice(0, 16)))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join(" ");
+      console.log(`[MP3] MP3 first 16 bytes (hex):`, head);
+    } catch (e) {
+      console.warn(`[MP3] Could not read mp3Blob bytes for sanity check`, e);
+    }
+
+
     console.log(`[MP3] MP3 MIME type: ${mp3Blob.type}`);
 
     onProgress?.(90);
@@ -211,6 +232,8 @@ export async function uploadMp3ToDrive(
     onProgress?.(20);
     console.log(`[Drive] Encoding MP3 to base64...`);
     const mp3Base64 = await blobToBase64(mp3Blob);
+    console.log(`[Drive] mp3Base64 length`, mp3Base64.length);
+
 
     // Upload to Google Drive via Apps Script
     onProgress?.(40);
