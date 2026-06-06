@@ -12,6 +12,12 @@ process.env.II_URL = process.env.II_URL || ii_url;
 process.env.STORAGE_GATEWAY_URL =
   process.env.STORAGE_GATEWAY_URL || "https://blob.caffeine.ai";
 
+// Ensure vite-plugin-environment has a value at build time
+process.env.VITE_MP3_SERVICE_URL =
+  process.env.VITE_MP3_SERVICE_URL ||
+  "https://mp3-conversion-974504303450.us-central1.run.app";
+
+
 export default defineConfig({
   base: "./",
   logLevel: "error",
@@ -43,6 +49,7 @@ export default defineConfig({
     environment("all", { prefix: "DFX_" }),
     environment(["II_URL"]),
     environment(["STORAGE_GATEWAY_URL"]),
+    environment(["VITE_MP3_SERVICE_URL"], { default: "https://mp3-conversion-974504303450.us-central1.run.app", prefix: "" }),
     react(),
   ],
   resolve: {
