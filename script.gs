@@ -482,7 +482,8 @@ function uploadAudioMp3(base64Data, fileName, mimeType, candidateName, interview
     
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     
-    const link = file.getUrl();
+    const fileId = file.getId();
+    const link = `https://drive.google.com/uc?export=download&id=${fileId}`;
     
     Logger.log("Upload successful!");
     Logger.log("File ID: " + file.getId());
