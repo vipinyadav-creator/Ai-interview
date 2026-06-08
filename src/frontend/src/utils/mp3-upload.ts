@@ -13,25 +13,14 @@ import { toast } from "sonner";
 // Configuration
 // ============================================================================
 
-const MP3_SERVICE_URL = import.meta.env.VITE_MP3_SERVICE_URL || "https://mp3-conversion-XXXXX.run.app";
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzzl0QBIWy-_MUmXDcaWRsGGGkv4Z5HUKXkosVZO5_7ErTBINjutlGHwZdv8Cmhvjenxg/exec";
-const MP3_MIME_TYPE = "audio/mpeg";
+
 
 // ============================================================================
 // Types
 // ============================================================================
 
-interface ConversionResponse {
-  success: boolean;
-  mp3_base64?: string;
-  filename: string;
-  mime_type: string;
-  error?: string;
-  duration_seconds?: number;
-  input_size_bytes: number;
-  output_size_bytes: number;
-  conversion_time_seconds?: number;
-}
+
 
 interface UploadOptions {
   candidateName: string;
@@ -71,11 +60,17 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
   return new Blob([bytes], { type: mimeType });
 }
 
-function buildMp3FileName(candidateName: string, interviewId: string): string {
+function buildAudioFileName(
+  candidateName: string,
+  interviewId: string,
+  extension: string
+): string {
   const safeCandidate = candidateName.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "_");
   const safeInterview = interviewId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return `${safeCandidate}_${safeInterview}.mp3`;
+  const safeExt = extension.replace(/[^a-zA-Z0-9]/g, "");
+  return `${safeCandidate}_${safeInterview}.${safeExt}`;
 }
+
 
 /**
  * Format bytes to human-readable format
@@ -93,157 +88,58 @@ function formatBytes(bytes: number, decimals: number = 2): string {
 // Core Conversion Function
 // ============================================================================
 
-/**
- * Convert WebM/Opus audio to MP3 using Cloud Run service
- * 
- * @param webmBlob - WebM/Opus audio blob
- * @param candidateName - Candidate name (for logging)
- * @param interviewId - Interview ID (for logging)
- * @param onProgress - Progress callback (0-100)
- * @returns MP3 blob
- */
-export async function convertAudioBlobToMp3(
-  webmBlob: Blob,
-  candidateName: string,
-  interviewId: string,
-  onProgress?: (progress: number) => void
-): Promise<Blob> {
-  try {
-    onProgress?.(10);
-    console.log(`[MP3] Starting conversion for ${candidateName} (${interviewId})`);
-    console.log(`[MP3] Input blob`, {
-      size: webmBlob.size,
-      type: webmBlob.type,
-    });
-    console.log(`[MP3] Input size: ${formatBytes(webmBlob.size)}`);
+// (MP3 conversion removed: audio is uploaded directly to Drive)
 
 
-    // Step 1: Encode to base64
-    onProgress?.(20);
-    console.log(`[MP3] Encoding to base64...`);
-    const webmBase64 = await blobToBase64(webmBlob);
-    console.log(`[MP3] Base64 length: ${webmBase64.length} characters`);
-
-    // Step 2: Send to Cloud Run service
-    onProgress?.(30);
-    console.log(`[MP3] Sending to Cloud Run: ${MP3_SERVICE_URL}`);
-
-    const conversionRequest = {
-      audio_base64: webmBase64,
-      filename: `${candidateName}_${interviewId}.webm`,
-      candidate_name: candidateName,
-      interview_id: interviewId,
-    };
-
-    const response = await fetch(`${MP3_SERVICE_URL}/convert-audio`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(conversionRequest),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Cloud Run error: ${response.status} - ${errorText}`);
-    }
-
-    onProgress?.(60);
-
-    const conversionResult: ConversionResponse = await response.json();
-
-    if (!conversionResult.success) {
-      throw new Error(`Conversion failed: ${conversionResult.error || "Unknown error"}`);
-    }
-
-    console.log(`[MP3] Conversion successful`);
-    console.log(`[MP3] Output size: ${formatBytes(conversionResult.output_size_bytes)}`);
-    console.log(`[MP3] Duration: ${conversionResult.duration_seconds?.toFixed(2) || "unknown"} seconds`);
-    console.log(`[MP3] Conversion time: ${conversionResult.conversion_time_seconds?.toFixed(2) || "unknown"} seconds`);
-    console.log(`[MP3] Compression ratio: ${(
-      ((webmBlob.size - conversionResult.output_size_bytes) / webmBlob.size) * 100
-    ).toFixed(1)}%`);
-
-    // Step 3: Decode base64 MP3
-    onProgress?.(80);
-    console.log(`[MP3] Decoding MP3 from base64...`);
-
-    if (!conversionResult.mp3_base64) {
-      throw new Error("No MP3 data in response");
-    }
-
-    const mp3Blob = base64ToBlob(conversionResult.mp3_base64, MP3_MIME_TYPE);
-
-    console.log(`[MP3] MP3 Blob created:`, {
-      size: mp3Blob.size,
-      type: mp3Blob.type,
-    });
-
-    // Sanity: first bytes (may help detect if MP3 isn't actually MP3)
-    try {
-      const buf = await mp3Blob.arrayBuffer();
-      const head = Array.from(new Uint8Array(buf.slice(0, 16)))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join(" ");
-      console.log(`[MP3] MP3 first 16 bytes (hex):`, head);
-    } catch (e) {
-      console.warn(`[MP3] Could not read mp3Blob bytes for sanity check`, e);
-    }
-
-
-    console.log(`[MP3] MP3 MIME type: ${mp3Blob.type}`);
-
-    onProgress?.(90);
-
-    return mp3Blob;
-  } catch (error) {
-    console.error(`[MP3] Conversion failed:`, error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    toast.error(`MP3 conversion failed: ${errorMessage}`);
-    throw error;
-  }
-}
 
 // ============================================================================
 // Google Drive Upload Function
 // ============================================================================
 
 /**
- * Upload MP3 file to Google Drive via Apps Script
+ * Upload recorded audio blob to Google Drive via Apps Script
  * 
- * @param mp3Blob - MP3 audio blob
+ * @param audioBlob - Recorded audio blob
  * @param candidateName - Candidate name
  * @param interviewId - Interview ID
  * @param onProgress - Progress callback (0-100)
  * @returns Google Drive link
  */
-export async function uploadMp3ToDrive(
-  mp3Blob: Blob,
+export async function uploadRecordedAudioToDrive(
+  audioBlob: Blob,
   candidateName: string,
   interviewId: string,
   onProgress?: (progress: number) => void
 ): Promise<{ success: boolean; link: string; message?: string }> {
   try {
-    onProgress?.(10);
-    console.log(`[Drive] Starting MP3 upload for ${candidateName} (${interviewId})`);
-    console.log(`[Drive] File size: ${formatBytes(mp3Blob.size)}`);
 
-    // Encode MP3 to base64
+    onProgress?.(10);
+    console.log(`[Drive] Starting audio upload for ${candidateName} (${interviewId})`);
+    console.log(`[Drive] File size: ${formatBytes(audioBlob.size)}`);
+
+
+    // Encode audio to base64
     onProgress?.(20);
-    console.log(`[Drive] Encoding MP3 to base64...`);
-    const mp3Base64 = await blobToBase64(mp3Blob);
-    console.log(`[Drive] mp3Base64 length`, mp3Base64.length);
+    console.log(`[Drive] Encoding audio to base64...`);
+    const audioBase64 = await blobToBase64(audioBlob);
+
+    console.log(`[Drive] audioBase64 length`, audioBase64.length);
 
 
     // Upload to Google Drive via Apps Script
+
     onProgress?.(40);
     console.log(`[Drive] Sending to Google Drive via Apps Script...`);
 
+    const mimeType = audioBlob.type || "audio/webm";
+    const extension = getAudioExtensionFromMimeType(mimeType);
+    const fileName = buildAudioFileName(candidateName, interviewId, extension);
+
     const uploadRequest = {
-      action: "uploadAudioMp3",
-      base64Data: mp3Base64,
-      fileName: buildMp3FileName(candidateName, interviewId),
-      mimeType: MP3_MIME_TYPE,
+      action: "uploadAudio",
+      base64Data: audioBase64,
+      fileName,
+      mimeType,
       candidateName,
       interviewId,
     };
@@ -299,71 +195,4 @@ export async function uploadMp3ToDrive(
  * @param options - Upload options
  * @returns Google Drive link
  */
-export async function convertAndUploadAudio(
-  webmBlob: Blob,
-  options: UploadOptions
-): Promise<{ success: boolean; link: string; mp3Size: number }> {
-  const { candidateName, interviewId, onProgress } = options;
 
-  try {
-    // Phase 1: Convert to MP3 (0-50%)
-    onProgress?.(0);
-    toast.loading("Converting audio to MP3...");
-
-    const mp3Blob = await convertAudioBlobToMp3(
-      webmBlob,
-      candidateName,
-      interviewId,
-      (progress) => onProgress?.(progress * 0.5)
-    );
-
-    // Phase 2: Upload to Google Drive (50-100%)
-    onProgress?.(50);
-    toast.loading("Uploading to Google Drive...");
-
-    const uploadResult = await uploadMp3ToDrive(
-      mp3Blob,
-      candidateName,
-      interviewId,
-      (progress) => onProgress?.(50 + progress * 0.5)
-    );
-
-    onProgress?.(100);
-    toast.success("Audio processed and uploaded successfully!");
-
-    return {
-      success: true,
-      link: uploadResult.link,
-      mp3Size: mp3Blob.size,
-    };
-  } catch (error) {
-    console.error(`[Upload] Complete flow failed:`, error);
-    throw error;
-  }
-}
-
-// ============================================================================
-// Batch Operations
-// ============================================================================
-
-/**
- * Get conversion service status
- */
-export async function checkMP3ServiceHealth(): Promise<boolean> {
-  try {
-    const response = await fetch(`${MP3_SERVICE_URL}/health`, {
-      method: "GET",
-    });
-    return response.ok;
-  } catch (error) {
-    console.error(`[MP3] Health check failed:`, error);
-    return false;
-  }
-}
-
-/**
- * Get service URL (for debugging)
- */
-export function getMP3ServiceUrl(): string {
-  return MP3_SERVICE_URL;
-}

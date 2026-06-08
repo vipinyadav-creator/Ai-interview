@@ -14,7 +14,8 @@ import { useLang } from "../LanguageContext";
 import {
   finalizeInterview,
 } from "../api";
-import { convertAndUploadAudio, checkMP3ServiceHealth } from "../utils/mp3-upload";
+import { uploadRecordedAudioToDrive } from "../utils/mp3-upload";
+
 
 type Step = "preparing" | "uploading" | "finalizing" | "complete" | "error";
 
@@ -61,15 +62,8 @@ export default function UploadScreen() {
       setStep("preparing");
       setProgress(5);
 
-      // Check MP3 service health
-      const serviceHealthy = await checkMP3ServiceHealth();
-      if (!serviceHealthy) {
-        throw new Error("MP3 conversion service is currently unavailable. Please try again in a moment.");
-      }
-      setProgress(10);
-
-      // Convert WebM to MP3 and upload to Drive in one step
-      const uploadResult = await convertAndUploadAudio(blob, {
+      // Upload recorded audio directly to Drive (no MP3 conversion)
+      const uploadResult = await uploadRecordedAudioToDrive(blob, {
         candidateName: state.candidateName,
         interviewId: state.interviewId,
         onProgress: (progress) => {
@@ -90,6 +84,7 @@ export default function UploadScreen() {
       setStep("finalizing");
       setProgress(92);
       await doFinalize(driveLink);
+
     } catch (err) {
       setStep("error");
       setErrorMsg(err instanceof Error ? err.message : "Upload failed");
