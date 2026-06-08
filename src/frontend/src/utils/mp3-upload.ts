@@ -90,6 +90,14 @@ function formatBytes(bytes: number, decimals: number = 2): string {
 
 // (MP3 conversion removed: audio is uploaded directly to Drive)
 
+function getAudioExtensionFromMimeType(mimeType: string): string {
+  const mt = mimeType.toLowerCase();
+  if (mt.includes("webm") || mt.includes("opus") || mt.includes("ogg")) return "webm";
+  if (mt.includes("mp3")) return "mp3";
+  if (mt.includes("mp4") || mt.includes("m4a") || mt.includes("aac")) return "mp4";
+  if (mt.includes("mpeg")) return "mp3";
+  return "webm";
+}
 
 
 // ============================================================================
@@ -107,11 +115,10 @@ function formatBytes(bytes: number, decimals: number = 2): string {
  */
 export async function uploadRecordedAudioToDrive(
   audioBlob: Blob,
-  candidateName: string,
-  interviewId: string,
-  onProgress?: (progress: number) => void
+  options: UploadOptions,
 ): Promise<{ success: boolean; link: string; message?: string }> {
   try {
+    const { candidateName, interviewId, onProgress } = options;
 
     onProgress?.(10);
     console.log(`[Drive] Starting audio upload for ${candidateName} (${interviewId})`);
@@ -134,6 +141,8 @@ export async function uploadRecordedAudioToDrive(
     const mimeType = audioBlob.type || "audio/webm";
     const extension = getAudioExtensionFromMimeType(mimeType);
     const fileName = buildAudioFileName(candidateName, interviewId, extension);
+
+
 
     const uploadRequest = {
       action: "uploadAudio",

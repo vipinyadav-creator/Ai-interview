@@ -68,7 +68,7 @@ export default function UploadScreen() {
         interviewId: state.interviewId,
         onProgress: (progress) => {
           // Map 0-100 progress to 15-90 on the screen
-          setProgress(15 + (progress * 0.75));
+          setProgress(15 + progress * 0.75);
         },
       });
 
