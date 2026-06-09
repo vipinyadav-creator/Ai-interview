@@ -22,10 +22,18 @@ const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzzl0QBIWy-_MUm
 
 
 
+export interface UploadDebugEvent {
+  httpStatus?: number;
+  audioUrl?: string;
+  errorMessage?: string;
+  audioBytes?: number;
+}
+
 interface UploadOptions {
   candidateName: string;
   interviewId: string;
   onProgress?: (progress: number) => void;
+  onDebug?: (event: UploadDebugEvent) => void;
 }
 
 // ============================================================================
@@ -118,7 +126,7 @@ export async function uploadRecordedAudioToDrive(
   options: UploadOptions,
 ): Promise<{ success: boolean; link: string; message?: string }> {
   try {
-    const { candidateName, interviewId, onProgress } = options;
+    const { candidateName, interviewId, onProgress, onDebug } = options;
 
     onProgress?.(10);
     console.log(`[Drive] Starting audio upload for ${candidateName} (${interviewId})`);
@@ -127,6 +135,7 @@ export async function uploadRecordedAudioToDrive(
 
     // Encode audio to base64
     onProgress?.(20);
+    onDebug?.({ audioBytes: audioBlob.size });
     console.log(`[Drive] Encoding audio to base64...`);
     const audioBase64 = await blobToBase64(audioBlob);
 
@@ -160,8 +169,10 @@ export async function uploadRecordedAudioToDrive(
       redirect: "follow",
     });
 
+    const httpStatus = response.status;
     if (!response.ok) {
-      throw new Error(`Apps Script error: ${response.status}`);
+      onDebug?.({ httpStatus, errorMessage: `Apps Script error: ${httpStatus}` });
+      throw new Error(`Apps Script error: ${httpStatus}`);
     }
 
     onProgress?.(80);
@@ -176,6 +187,10 @@ export async function uploadRecordedAudioToDrive(
     }
 
     if (!data.success) {
+      onDebug?.({
+        httpStatus,
+        errorMessage: data.message || "Upload failed",
+      });
       throw new Error(data.message || "Upload failed");
     }
 
@@ -183,11 +198,13 @@ export async function uploadRecordedAudioToDrive(
     console.log(`[Drive] Link: ${data.link}`);
 
     onProgress?.(100);
+    onDebug?.({ httpStatus, audioUrl: data.link, audioBytes: audioBlob.size });
 
     return { success: true, link: data.link, message: data.message };
   } catch (error) {
     console.error(`[Drive] Upload failed:`, error);
     const errorMessage = error instanceof Error ? error.message : String(error);
+    onDebug?.({ errorMessage });
     toast.error(`Drive upload failed: ${errorMessage}`);
     throw error;
   }

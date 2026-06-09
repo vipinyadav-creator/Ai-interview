@@ -2,6 +2,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { AnimatePresence, motion } from "motion/react";
 import React, { Suspense } from "react";
 import { AppProvider, useApp } from "./AppContext";
+import { DebugProvider } from "./debug/DebugContext";
 import { LanguageProvider } from "./LanguageContext";
 const InterviewScreen = React.lazy(() => import("./screens/InterviewScreen"));
 const IntroScreen = React.lazy(() => import("./screens/IntroScreen"));
@@ -38,9 +39,11 @@ function Router() {
 export default function App() {
   return (
     <LanguageProvider>
-      <AppProvider>
-        <Router />
-      </AppProvider>
+      <DebugProvider>
+        <AppProvider>
+          <Router />
+        </AppProvider>
+      </DebugProvider>
     </LanguageProvider>
   );
 }

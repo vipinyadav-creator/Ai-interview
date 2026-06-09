@@ -26,8 +26,15 @@ import { toast } from "sonner";
 import { useApp } from "../AppContext";
 import { useLang } from "../LanguageContext";
 import { ttsSynthesize } from "../api";
+import { useDebug } from "../debug/DebugContext";
+import DebugPanel from "../debug/DebugPanel";
 import { warmAudioConversion } from "../utils/audio";
-import DebugPanel, { DebugStep } from "../debug/DebugPanel";
+import {
+  getVoiceTarget,
+  loadSpeechVoices,
+  pickPreferredVoice,
+  type InterviewLang,
+} from "../utils/voice";
 
 
 
@@ -49,6 +56,8 @@ const AUDIO_BARS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 export default function InterviewScreen() {
   const { state, setState } = useApp();
   const { t, lang } = useLang();
+  const { steps: debugSteps, logStep } = useDebug();
+  const interviewLang = lang as InterviewLang;
   const {
     candidateName,
     department,
@@ -181,145 +190,174 @@ export default function InterviewScreen() {
     }
   }, [timeLeft]);
 
+  const ensureMicRecordingStarted = useCallback(async () => {
+    if (!audioContextRef.current || audioContextRef.current.state === "closed") {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      audioContextRef.current = new AudioContextClass({ sampleRate: 48000 });
+    }
+
+    const audioCtx = audioContextRef.current;
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume();
+    }
+
+    if (!destinationRef.current) {
+      destinationRef.current = audioCtx.createMediaStreamDestination();
+    }
+
+    const destination = destinationRef.current;
+
+    if (streamRef.current && !micSourceRef.current) {
+      const micSource = audioCtx.createMediaStreamSource(streamRef.current);
+      micSource.connect(destination);
+      micSourceRef.current = micSource;
+    }
+
+    if (!mediaRecorderRef.current || mediaRecorderRef.current.state === "inactive") {
+      const mixedStream = destination.stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "";
+      const mr = new MediaRecorder(
+        mixedStream,
+        mimeType ? { mimeType, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 48000 },
+      );
+
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      mr.start(1000);
+
+      mrKeepAliveRef.current = setInterval(() => {
+        if (mr.state === "paused") mr.resume();
+      }, 2000);
+      mediaRecorderRef.current = mr;
+
+      logStep("AUDIO_CAPTURE_STARTED", {
+        status: "success",
+        functionName: "ensureMicRecordingStarted",
+        meta: { mimeType: mr.mimeType, chunkIntervalMs: 1000 },
+      });
+    }
+
+    return destination;
+  }, [logStep]);
+
+  const playBrowserTtsFallback = useCallback(
+    async (text: string, onDone: () => void, ttsError?: string) => {
+      const voiceTarget = getVoiceTarget(interviewLang);
+      const voices = await loadSpeechVoices();
+      const voiceToUse = pickPreferredVoice(voices, interviewLang);
+
+      logStep("VOICE_SELECTED", {
+        status: voiceToUse ? "success" : "error",
+        voiceName: voiceToUse?.name || voiceTarget.label,
+        functionName: "pickPreferredVoice",
+        errorMessage: voiceToUse
+          ? undefined
+          : `${voiceTarget.label} not found in browser (${voices.length} voices)`,
+        meta: { provider: "browser", fallbackReason: ttsError },
+      });
+
+      await ensureMicRecordingStarted();
+
+      cleanupCurrentTts();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = voiceTarget.lang;
+      utter.rate = 0.9;
+      if (voiceToUse) utter.voice = voiceToUse;
+
+      utter.onend = () => {
+        setIsSpeaking(false);
+        logStep("TTS_COMPLETED", {
+          status: "success",
+          functionName: "playBrowserTtsFallback",
+          voiceName: voiceToUse?.name || voiceTarget.label,
+          meta: { provider: "browser" },
+        });
+        onDone();
+      };
+      utter.onerror = (ev) => {
+        setIsSpeaking(false);
+        logStep("TTS_COMPLETED", {
+          status: "error",
+          functionName: "playBrowserTtsFallback",
+          errorMessage: (ev as SpeechSynthesisErrorEvent).error || "Speech error",
+        });
+        onDone();
+      };
+
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utter);
+    },
+    [cleanupCurrentTts, ensureMicRecordingStarted, interviewLang, logStep],
+  );
+
   // --- TTS Playing & Mixing ---
   const playTtsWithMix = useCallback(
-    async (text: string, idx: number, onDone: () => void) => {
+    async (text: string, _idx: number, onDone: () => void) => {
+      const voiceTarget = getVoiceTarget(interviewLang);
+      const ttsLang = interviewLang === "hi" ? "hi-IN" : "en-US";
+      const ttsStart = Date.now();
+
       try {
         setIsSpeaking(true);
+        logStep("TTS_STARTED", {
+          status: "running",
+          functionName: "playTtsWithMix",
+          voiceName: voiceTarget.label,
+          meta: { lang: ttsLang, provider: "server" },
+        });
 
-        // Fetch TTS (server-side). If TTS fails, fallback to browser SpeechSynthesis for playback.
-        const ttsRes = await ttsSynthesize(
-          text,
-          lang === "hi" ? "hi-IN" : "en-US"
-        );
+        const ttsRes = await ttsSynthesize(text, ttsLang);
 
         if (!ttsRes?.audioBase64) {
-          // NOTE: SpeechSynthesis fallback ensures listening works even if server TTS fails.
-          // Upload/mixing pipeline will not include this fallback audio.
-          const targetVoiceName = lang === "hi" ? "Madhur" : "Arjun";
-          const targetLang = lang === "hi" ? "hi-IN" : "en-IN";
-
-          try {
-            setIsSpeaking(true);
-            cleanupCurrentTts();
-
-            const voices = window.speechSynthesis.getVoices() || [];
-            // Ensure voices are loaded (some browsers load async)
-            if (!voices.length) {
-              await new Promise<void>((resolve) => {
-                const t = window.setTimeout(() => {
-                  window.speechSynthesis.onvoiceschanged = null;
-                  resolve();
-                }, 800);
-                window.speechSynthesis.onvoiceschanged = () => {
-                  window.clearTimeout(t);
-                  window.speechSynthesis.onvoiceschanged = null;
-                  resolve();
-                };
-              });
-            }
-
-            const voices2 = window.speechSynthesis.getVoices() || [];
-
-
-            const preferred = voices.find((v) => v && v.name === targetVoiceName);
-            const byLang = voices.filter((v) => v && v.lang === targetLang);
-            const bestLangVoice = byLang[0] || voices.find((v) => v && v.lang && v.lang.startsWith(lang === "hi" ? "hi" : "en"));
-            const voiceToUse = preferred || bestLangVoice || voices[0] || null;
-
-            // Log for debugging
-            // eslint-disable-next-line no-console
-            console.log(`[VOICE] ${lang === "hi" ? "Hindi" : "English"} -> ${voiceToUse ? voiceToUse.name : "(none)"} (${voiceToUse ? voiceToUse.lang : "unknown"})`);
-
-            const utter = new SpeechSynthesisUtterance(text);
-            utter.lang = targetLang;
-            utter.rate = 0.9;
-            if (voiceToUse) utter.voice = voiceToUse;
-
-            utter.onend = () => {
-              setIsSpeaking(false);
-              onDone();
-            };
-            utter.onerror = () => {
-              setIsSpeaking(false);
-              onDone();
-            };
-
-            window.speechSynthesis.cancel();
-            window.speechSynthesis.speak(utter);
-            return;
-          } catch (e) {
-            throw new Error(ttsRes?.message || "TTS failed");
-          }
+          logStep("TTS_STARTED", {
+            status: "error",
+            functionName: "ttsSynthesize",
+            httpStatus: ttsRes.httpStatus,
+            errorMessage: ttsRes.message || "Server TTS returned empty audio",
+            meta: { provider: "server", fallback: "browser" },
+          });
+          await playBrowserTtsFallback(text, onDone, ttsRes.message);
+          return;
         }
+
+        logStep("VOICE_SELECTED", {
+          status: "success",
+          voiceName: voiceTarget.label,
+          functionName: "ttsSynthesize",
+          httpStatus: ttsRes.httpStatus,
+          meta: {
+            provider: "server",
+            edgeVoice: interviewLang === "hi" ? "hi-IN-MadhurNeural" : "en-IN-ArjunNeural",
+          },
+        });
 
         const audioUrl = `data:audio/mp3;base64,${ttsRes.audioBase64}`;
-
         cleanupCurrentTts();
 
+        const destination = await ensureMicRecordingStarted();
 
-
-
-        // Setup a single recording graph for the whole interview. Restarting
-        // MediaRecorder creates separate WebM containers, which corrupts downloads.
-        if (!audioContextRef.current || audioContextRef.current.state === "closed") {
-          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-          audioContextRef.current = new AudioContextClass({ sampleRate: 48000 });
-        }
-        
-        const audioCtx = audioContextRef.current;
-
-        if (!destinationRef.current) {
-          destinationRef.current = audioCtx.createMediaStreamDestination();
-        }
-
-        const destination = destinationRef.current;
-
-        // Mic source (already in streamRef.current)
-        if (streamRef.current && !micSourceRef.current) {
-          const micSource = audioCtx.createMediaStreamSource(streamRef.current);
-          micSource.connect(destination);
-          micSourceRef.current = micSource;
-        }
-
-        // TTS audio
         ttsAudioRef.current = new Audio(audioUrl);
-        // Ensure CORS if needed, though data URI shouldn't need it
-        ttsAudioRef.current.crossOrigin = "anonymous"; 
-        
+        ttsAudioRef.current.crossOrigin = "anonymous";
+
+        const audioCtx = audioContextRef.current!;
         const ttsSource = audioCtx.createMediaElementSource(ttsAudioRef.current);
         ttsSource.connect(destination);
-        // Connect to destination AND to hardware output so the user hears it
-        ttsSource.connect(audioCtx.destination); 
+        ttsSource.connect(audioCtx.destination);
         ttsSourceRef.current = ttsSource;
-
-        // Resume AudioContext if suspended (browser autoplay policy)
-        if (audioCtx.state === 'suspended') {
-            await audioCtx.resume();
-        }
-
-        if (!mediaRecorderRef.current || mediaRecorderRef.current.state === "inactive") {
-          const mixedStream = destination.stream;
-          const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") 
-              ? "audio/webm;codecs=opus" 
-              : "";
-              
-          const mr = new MediaRecorder(mixedStream, mimeType ? { mimeType, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 48000 });
-          
-          mr.ondataavailable = (e) => {
-            if (e.data.size > 0) chunksRef.current.push(e.data);
-          };
-          mr.start(1000);
-
-          mrKeepAliveRef.current = setInterval(() => {
-            if (mr.state === "paused") mr.resume();
-          }, 2000);
-          mediaRecorderRef.current = mr;
-        }
 
         await ttsAudioRef.current.play();
 
-        // Cleanup on end
+        logStep("TTS_COMPLETED", {
+          status: "success",
+          functionName: "playTtsWithMix",
+          voiceName: voiceTarget.label,
+          httpStatus: ttsRes.httpStatus,
+          meta: { provider: "server", durationMs: Date.now() - ttsStart },
+        });
+
         ttsAudioRef.current.onended = () => {
           setIsSpeaking(false);
           cleanupCurrentTts();
@@ -328,19 +366,39 @@ export default function InterviewScreen() {
 
         ttsAudioRef.current.onerror = () => {
           setIsSpeaking(false);
+          logStep("TTS_COMPLETED", {
+            status: "error",
+            functionName: "playTtsWithMix",
+            errorMessage: "Audio element playback failed",
+          });
           cleanupCurrentTts();
           onDone();
         };
-
       } catch (err) {
+        const msg = err instanceof Error ? err.message : "TTS failed";
         console.error("TTS/Mixing error:", err);
+        logStep("TTS_STARTED", {
+          status: "error",
+          functionName: "playTtsWithMix",
+          errorMessage: msg,
+        });
         toast.error("TTS failed, starting timer");
         setIsSpeaking(false);
         cleanupCurrentTts();
-        onDone();
+        try {
+          await playBrowserTtsFallback(text, onDone, msg);
+        } catch {
+          onDone();
+        }
       }
     },
-    [lang, cleanupCurrentTts]
+    [
+      cleanupCurrentTts,
+      ensureMicRecordingStarted,
+      interviewLang,
+      logStep,
+      playBrowserTtsFallback,
+    ],
   );
 
   // --- Initial setup ---
@@ -412,10 +470,21 @@ export default function InterviewScreen() {
       const doFinish = async () => {
         const recordedMimeType = mr?.mimeType || chunksRef.current[0]?.type || "audio/webm";
         const rawBlob = new Blob(chunksRef.current, { type: recordedMimeType });
-        
+
+        logStep("AUDIO_CAPTURE_COMPLETED", {
+          status: rawBlob.size > 0 ? "success" : "error",
+          functionName: "finishInterview",
+          audioBytes: rawBlob.size,
+          errorMessage:
+            rawBlob.size > 0
+              ? undefined
+              : "No audio chunks captured — recording may not have started",
+          meta: { chunks: chunksRef.current.length, mimeType: recordedMimeType },
+        });
+
         cleanupRecordingGraph();
         stopStream(streamRef.current);
-        
+
         setState({
           screen: "upload",
           recordedBlob: rawBlob,
@@ -435,7 +504,7 @@ export default function InterviewScreen() {
         void doFinish();
       }
     },
-    [setState, stopStream, stopMrKeepAlive, stopTimer, cleanupCurrentTts, cleanupRecordingGraph]
+    [setState, stopStream, stopMrKeepAlive, stopTimer, cleanupCurrentTts, cleanupRecordingGraph, logStep]
   );
 
   useEffect(() => {
@@ -553,30 +622,12 @@ export default function InterviewScreen() {
         />
       </div>
 
-      {/* Temporary debug panel (does not affect normal UI) */}
-      <details className="w-full max-w-3xl mx-auto px-3" open={false}>
+      <details className="w-full max-w-3xl mx-auto px-3" open>
         <summary className="cursor-pointer select-none text-xs font-semibold text-muted-foreground">
           Debug Diagnostics ▼
         </summary>
         <div className="mt-2">
-          {/* We will populate steps in a small follow-up edit */}
-          <DebugPanel
-            title="TTS Diagnostics"
-            steps={[
-              { key: "VOICE_SELECTED", status: "idle", ts: Date.now() },
-              { key: "TTS_STARTED", status: "idle", ts: Date.now(), functionName: "playTtsWithMix" },
-              { key: "TTS_COMPLETED", status: "idle", ts: Date.now(), meta: { durationMs: "-" } },
-              {
-                key: "TTS_FAILED",
-                status: "error",
-                ts: Date.now(),
-                functionName: "playTtsWithMix",
-                errorMessage: "debugSteps not wired yet",
-              },
-            ] as DebugStep[]}
-          />
-
-
+          <DebugPanel title="Pipeline Diagnostics" steps={debugSteps} />
         </div>
       </details>
 

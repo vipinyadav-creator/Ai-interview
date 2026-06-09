@@ -90,19 +90,37 @@ export async function initInterview(
 export async function ttsSynthesize(
   text: string,
   lang: string,
-): Promise<{ audioBase64: string; message?: string }> {
-  const res = await post<{
+): Promise<{ audioBase64: string; message?: string; httpStatus?: number }> {
+  const res = await fetch(APPS_SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({ action: "tts", text, lang }),
+    redirect: "follow",
+  });
+  const httpStatus = res.status;
+  const textBody = await res.text();
+  let data: {
     success: boolean;
-    audioBase64: string;
+    audioBase64?: string;
     message?: string;
-    statusCode?: number;
-  }>("tts", { text, lang });
-  if (!res.success) {
-    // Let caller decide. InterviewScreen will fail and show status properly.
-    return { audioBase64: "", message: res.message };
+  };
+  try {
+    data = JSON.parse(textBody);
+  } catch {
+    return {
+      audioBase64: "",
+      message: "Invalid TTS response from server",
+      httpStatus,
+    };
   }
-
-  return { audioBase64: res.audioBase64, message: res.message };
+  if (!data.success || !data.audioBase64) {
+    return {
+      audioBase64: "",
+      message: data.message || `TTS failed (HTTP ${httpStatus})`,
+      httpStatus,
+    };
+  }
+  return { audioBase64: data.audioBase64, message: data.message, httpStatus };
 }
 
 
@@ -130,12 +148,29 @@ export async function finalizeInterview(
   screenSwitchCount: number,
   _selectedQuestionUIDs: string[],
   audioDriveLink?: string,
-): Promise<{ success: boolean; audioLink: string }> {
-  const res = await post<{ success: boolean; message: string }>("saveResult", {
-    interviewId,
-    audioDriveLink: audioDriveLink || "",
-    screenSwitchCount,
-    status: "COMPLETED",
+): Promise<{ success: boolean; audioLink: string; httpStatus?: number }> {
+  const res = await fetch(APPS_SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({
+      action: "saveResult",
+      interviewId,
+      audioDriveLink: audioDriveLink || "",
+      screenSwitchCount,
+      status: "COMPLETED",
+    }),
+    redirect: "follow",
   });
-  return { success: res.success, audioLink: audioDriveLink || "" };
+  const httpStatus = res.status;
+  const textBody = await res.text();
+  let data: { success: boolean; message?: string };
+  try {
+    data = JSON.parse(textBody);
+  } catch {
+    throw new Error(`Invalid saveResult response (HTTP ${httpStatus})`);
+  }
+  if (!data.success) {
+    throw new Error(data.message || `saveResult failed (HTTP ${httpStatus})`);
+  }
+  return { success: true, audioLink: audioDriveLink || "", httpStatus };
 }

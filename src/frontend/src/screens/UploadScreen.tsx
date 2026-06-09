@@ -10,18 +10,18 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../AppContext";
+import { useDebug } from "../debug/DebugContext";
+import DebugPanel from "../debug/DebugPanel";
 import { useLang } from "../LanguageContext";
-import {
-  finalizeInterview,
-} from "../api";
+import { finalizeInterview } from "../api";
 import { uploadRecordedAudioToDrive } from "../utils/mp3-upload";
-
 
 type Step = "preparing" | "uploading" | "finalizing" | "complete" | "error";
 
 export default function UploadScreen() {
   const { state } = useApp();
   const { t } = useLang();
+  const { steps: debugSteps, logStep } = useDebug();
   const [step, setStep] = useState<Step>("preparing");
   const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState("");
@@ -43,7 +43,6 @@ export default function UploadScreen() {
 
   const runUpload = async () => {
     try {
-      // 🌐 INTERNET CHECK (English)
       if (!navigator.onLine) {
         throw new Error(
           "Your internet connection is not working. Please check your connection and try again.",
@@ -54,27 +53,59 @@ export default function UploadScreen() {
       let driveLink = "";
 
       if (!blob || blob.size === 0) {
-        setStep("finalizing");
-        await doFinalize(driveLink);
+        const msg = "No recorded audio — upload skipped (blob empty)";
+        logStep("UPLOAD_STARTED", {
+          status: "error",
+          functionName: "runUpload",
+          errorMessage: msg,
+          audioBytes: 0,
+        });
+        logStep("UPLOAD_COMPLETED", {
+          status: "error",
+          functionName: "runUpload",
+          errorMessage: msg,
+        });
+        setStep("error");
+        setErrorMsg(msg);
+        toast.error(msg);
         return;
       }
 
       setStep("preparing");
       setProgress(5);
 
-      // Upload recorded audio directly to Drive (no MP3 conversion)
+      logStep("UPLOAD_STARTED", {
+        status: "running",
+        functionName: "uploadRecordedAudioToDrive",
+        audioBytes: blob.size,
+      });
+
       const uploadResult = await uploadRecordedAudioToDrive(blob, {
         candidateName: state.candidateName,
         interviewId: state.interviewId,
-        onProgress: (progress) => {
-          // Map 0-100 progress to 15-90 on the screen
-          setProgress(15 + progress * 0.75);
+        onProgress: (p) => setProgress(15 + p * 0.75),
+        onDebug: (ev) => {
+          if (ev.errorMessage) {
+            logStep("UPLOAD_COMPLETED", {
+              status: "error",
+              functionName: "uploadRecordedAudioToDrive",
+              httpStatus: ev.httpStatus,
+              errorMessage: ev.errorMessage,
+              audioBytes: ev.audioBytes,
+            });
+          }
         },
       });
 
       if (uploadResult.success && uploadResult.link) {
         driveLink = uploadResult.link;
         setAudioLink(driveLink);
+        logStep("UPLOAD_COMPLETED", {
+          status: "success",
+          functionName: "uploadRecordedAudioToDrive",
+          audioUrl: driveLink,
+          audioBytes: blob.size,
+        });
       } else {
         throw new Error(
           uploadResult.link ? "Upload completed with warnings" : "Audio upload failed",
@@ -84,30 +115,56 @@ export default function UploadScreen() {
       setStep("finalizing");
       setProgress(92);
       await doFinalize(driveLink);
-
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      logStep("UPLOAD_COMPLETED", {
+        status: "error",
+        functionName: "runUpload",
+        errorMessage: msg,
+      });
       setStep("error");
-      setErrorMsg(err instanceof Error ? err.message : "Upload failed");
-      toast.error(
-        `Upload failed: ${err instanceof Error ? err.message : "Error"}`,
-      );
+      setErrorMsg(msg);
+      toast.error(`Upload failed: ${msg}`);
     }
   };
 
   const doFinalize = async (link: string) => {
+    logStep("SHEET_UPDATE_STARTED", {
+      status: "running",
+      functionName: "finalizeInterview",
+      audioUrl: link || undefined,
+      meta: { interviewId: state.interviewId },
+    });
+
     try {
-      await finalizeInterview(
+      const result = await finalizeInterview(
         state.interviewId,
         state.token,
         state.screenSwitchCount,
         state.selectedQuestionUIDs,
         link,
       );
+
+      logStep("SHEET_UPDATE_COMPLETED", {
+        status: link ? "success" : "error",
+        functionName: "saveResult",
+        httpStatus: result.httpStatus,
+        audioUrl: result.audioLink || undefined,
+        errorMessage: link ? undefined : "Sheet updated but audioDriveLink was empty",
+      });
+
       setProgress(100);
       setStep("complete");
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Finalization failed";
+      logStep("SHEET_UPDATE_COMPLETED", {
+        status: "error",
+        functionName: "saveResult",
+        errorMessage: msg,
+      });
       setStep("error");
-      setErrorMsg("Finalization failed.");
+      setErrorMsg(msg);
+      toast.error(msg);
     }
   };
 
@@ -120,10 +177,15 @@ export default function UploadScreen() {
           <div className="w-9 h-9 rounded-xl bg-brand-blue flex items-center justify-center shadow-glow">
             <BrainCircuit className="w-5 h-5 text-white" />
           </div>
-          <span className="text-xl font-bold gradient-brand">
-            {t.brandName}
-          </span>
+          <span className="text-xl font-bold gradient-brand">{t.brandName}</span>
         </div>
+
+        <details className="mb-4" open>
+          <summary className="cursor-pointer select-none text-xs font-semibold text-muted-foreground mb-2">
+            Debug Diagnostics ▼
+          </summary>
+          <DebugPanel title="Upload & Sheet Diagnostics" steps={debugSteps} />
+        </details>
 
         <div className="card-glass rounded-2xl p-5 sm:p-8">
           {step === "complete" ? (
@@ -134,9 +196,12 @@ export default function UploadScreen() {
               <h2 className="text-xl font-bold text-foreground mb-2">
                 {t.interviewSubmitted}
               </h2>
-              <p className="text-muted-foreground text-sm mb-6">
-                {t.submittedDesc}
-              </p>
+              <p className="text-muted-foreground text-sm mb-6">{t.submittedDesc}</p>
+              {audioLink ? (
+                <p className="text-xs text-muted-foreground break-all mb-4">
+                  Audio: {audioLink}
+                </p>
+              ) : null}
               <div className="bg-secondary rounded-xl p-4 text-left space-y-2">
                 <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">
                   {t.summary}
@@ -146,16 +211,11 @@ export default function UploadScreen() {
                   {state.candidateName}
                 </p>
                 <p className="text-sm text-foreground">
-                  <span className="text-muted-foreground">
-                    {t.questionsAnswered}:
-                  </span>{" "}
-                  {state.selectedQuestionUIDs.length} {t.of}{" "}
-                  {state.questions.length}
+                  <span className="text-muted-foreground">{t.questionsAnswered}:</span>{" "}
+                  {state.selectedQuestionUIDs.length} {t.of} {state.questions.length}
                 </p>
                 <p className="text-sm text-foreground flex items-center gap-1.5">
-                  <span className="text-muted-foreground">
-                    Screen Switches:
-                  </span>{" "}
+                  <span className="text-muted-foreground">Screen Switches:</span>{" "}
                   <span
                     className={
                       state.screenSwitchCount >= 5
@@ -173,9 +233,7 @@ export default function UploadScreen() {
               <div className="w-16 h-16 rounded-full bg-status-red/15 flex items-center justify-center mx-auto mb-4">
                 <FileAudio className="w-8 h-8 text-status-red" />
               </div>
-              <h2 className="text-xl font-bold text-foreground mb-2">
-                {t.uploadFailed}
-              </h2>
+              <h2 className="text-xl font-bold text-foreground mb-2">{t.uploadFailed}</h2>
               <p className="text-muted-foreground text-sm">{errorMsg}</p>
               <button
                 onClick={() => window.location.reload()}
@@ -202,17 +260,13 @@ export default function UploadScreen() {
               <div className="bg-status-amber/10 border border-status-amber/30 rounded-lg p-3 mb-6 flex gap-3 items-center">
                 <AlertTriangle className="w-5 h-5 text-status-amber flex-shrink-0" />
                 <p className="text-xs font-semibold text-status-amber">
-                  IMPORTANT: Please do not close or minimize this tab. If the
-                  internet disconnects, please retry.
+                  IMPORTANT: Please do not close or minimize this tab. If the internet
+                  disconnects, please retry.
                 </p>
               </div>
               <div className="mb-2 flex justify-between items-center">
-                <span className="text-sm text-muted-foreground">
-                  {t.uploadProgress}
-                </span>
-                <span className="text-sm font-semibold text-foreground">
-                  {progress}%
-                </span>
+                <span className="text-sm text-muted-foreground">{t.uploadProgress}</span>
+                <span className="text-sm font-semibold text-foreground">{progress}%</span>
               </div>
               <Progress
                 value={progress}
@@ -243,9 +297,7 @@ export default function UploadScreen() {
             </div>
           )}
         </div>
-        <p className="text-center mt-6 text-xs text-muted-foreground">
-          {t.footer}
-        </p>
+        <p className="text-center mt-6 text-xs text-muted-foreground">{t.footer}</p>
       </div>
     </div>
   );

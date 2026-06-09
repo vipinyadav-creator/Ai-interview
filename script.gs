@@ -67,11 +67,11 @@ function respond(data) {
 function ttsSynthesize(text, lang = 'hi-IN') {
   try {
     const voiceMap = {
-      'en-US': 'en-IN-NeerjaNeural',
-      'en-IN': 'en-IN-NeerjaNeural',
-      'hi-IN': 'hi-IN-SwatiNeural'
+      'en-US': 'en-IN-ArjunNeural',
+      'en-IN': 'en-IN-ArjunNeural',
+      'hi-IN': 'hi-IN-MadhurNeural'
     };
-    const voice = voiceMap[lang] || (lang.startsWith('en') ? 'en-IN-NeerjaNeural' : 'hi-IN-SwatiNeural');
+    const voice = voiceMap[lang] || (lang.startsWith('en') ? 'en-IN-ArjunNeural' : 'hi-IN-MadhurNeural');
     
     const url = `https://faceless.edgetts.net?voice=${voice}&rate=+0%&pitch=+0Hz`;
     
