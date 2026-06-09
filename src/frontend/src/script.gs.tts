@@ -1,16 +1,50 @@
 function ttsSynthesize(text, lang = 'en-US') {
   try {
-    // Google Translate TTS hack
-    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang === 'hi-IN' ? 'hi' : 'en'}&client=tw-ob&q=${encodeURIComponent(text)}`;
+    // Provider 1: EdgeTTS (preferred)
+    const voiceMap = {
+      'en-US': 'en-IN-NeerjaNeural',
+      'en-IN': 'en-IN-NeerjaNeural',
+      'hi-IN': 'hi-IN-SwatiNeural'
+    };
+
+    const voice = voiceMap[lang] || (lang && lang.toString().startsWith('en') ? 'en-IN-NeerjaNeural' : 'hi-IN-SwatiNeural');
+
+    const edgeUrl = `https://faceless.edgetts.net?voice=${voice}&rate=+0%&pitch=+0Hz`;
+    const edgePayload = { text: text };
+
+    // Retry few times for reliability (rate limits / transient failures)
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const edgeResp = UrlFetchApp.fetch(edgeUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          payload: JSON.stringify(edgePayload),
+          muteHttpExceptions: true
+        });
+
+        if (edgeResp.getResponseCode() === 200) {
+          const audioBlob = edgeResp.getBlob();
+          const audioBase64 = Utilities.base64Encode(audioBlob.getBytes());
+          return { success: true, audioBase64: audioBase64, provider: 'edgetts' };
+        }
+      } catch (edgeErr) {
+        // ignore and retry
+      }
+
+      Utilities.sleep(400);
+    }
+
+    // Provider 2: Google Translate TTS
+    const tlParam = (lang && lang.toString().startsWith('hi')) ? 'hi' : 'en';
+    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${tlParam}&client=tw-ob&ttsspeed=1&q=${encodeURIComponent(text)}`;
 
     const response = UrlFetchApp.fetch(ttsUrl, { muteHttpExceptions: true });
     const statusCode = response.getResponseCode();
 
     if (statusCode === 200) {
-      const audioBlob = response.getBlob();
-      const audioBytes = audioBlob.getBytes();
-      const audioBase64 = Utilities.base64Encode(audioBytes);
-      return { success: true, audioBase64 };
+      const audioBlob2 = response.getBlob();
+      const audioBase642 = Utilities.base64Encode(audioBlob2.getBytes());
+      return { success: true, audioBase64: audioBase642, provider: 'google-translate' };
     }
 
     const errText = response.getContentText();
