@@ -1,6 +1,17 @@
+// ============================================================
+// CONFIG — update these before deploy if needed
+// ============================================================
+
 const INTERVIEWS_SHEET = "Interviews";
 const QUESTIONS_SHEET = "Question Sets";
 const OTP_EXPIRY_MINUTES = 10;
+const FRONTEND_URL = "https://rawalwasia-ai-interview.vercel.app";
+
+// Google Drive folder where interview audio files are saved.
+// 1) Create a folder in Drive (or use an existing one)
+// 2) Open folder → copy ID from URL: drive.google.com/drive/folders/FOLDER_ID_HERE
+// 3) Share folder with the Google account that owns this script (Editor access)
+const AUDIO_UPLOAD_FOLDER_ID = "1p4fZ5y7mDCRIJcSefywPCMH2CSuzLSbc";
 
 // ============================================================
  // WEB APP ENTRY POINTS
@@ -102,7 +113,6 @@ function generateInterviewLinksForPending() {
   const sheet = ss.getSheetByName(INTERVIEWS_SHEET);
   if (!sheet) throw new Error("Sheet not found: " + INTERVIEWS_SHEET);
 
-  const FRONTEND_URL = "https://rawalwasia-ai-interview.vercel.app";
   const VIDEO_URL = "https://drive.google.com/file/d/1o7J-ZIBiFzBD1-4PhvKxCW9db1DTLxd9/view?usp=sharing";
 
   const data = sheet.getDataRange().getValues();
@@ -384,15 +394,29 @@ function saveResult(body) {
  // AUDIO UPLOAD TO GOOGLE DRIVE
 // ============================================================
 
+function getAudioUploadFolder() {
+  try {
+    const folder = DriveApp.getFolderById(AUDIO_UPLOAD_FOLDER_ID);
+    if (!folder) {
+      throw new Error("Folder not found: " + AUDIO_UPLOAD_FOLDER_ID);
+    }
+    return folder;
+  } catch (err) {
+    throw new Error(
+      "Cannot access audio upload folder (" + AUDIO_UPLOAD_FOLDER_ID + "). " +
+      "Create the folder, paste its ID into AUDIO_UPLOAD_FOLDER_ID, and share it with this script owner. " +
+      "Details: " + err.toString()
+    );
+  }
+}
+
 function uploadAudioToDrive(base64Data, fileName, mimeType, candidateName, interviewId) {
   try {
-    const FOLDER_ID = "1nOJjVKbuSeaCzYvzD3BYJ2RhCoJd_1ch";
-
     if (!base64Data) {
       throw new Error("Missing required parameter: base64Data");
     }
 
-    const folder = DriveApp.getFolderById(FOLDER_ID);
+    const folder = getAudioUploadFolder();
     const requestedMimeType = String(mimeType || "audio/webm").split(";")[0].trim().toLowerCase();
     const extension = getAudioExtensionFromMimeType(requestedMimeType);
     const safeCandidate = String(candidateName || "candidate").replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -443,18 +467,13 @@ function getAudioExtensionFromMimeType(mimeType) {
  */
 function uploadAudioMp3(base64Data, fileName, mimeType, candidateName, interviewId) {
   try {
-    const FOLDER_ID = "1p4fZ5y7mDCRIJcSefywPCMH2CSuzLSbc";
-    
     if (!base64Data || !fileName) {
       throw new Error("Missing required parameters: base64Data or fileName");
     }
     
     mimeType = "audio/mpeg";
     
-    const folder = DriveApp.getFolderById(FOLDER_ID);
-    if (!folder) {
-      throw new Error("Could not access Google Drive folder: " + FOLDER_ID);
-    }
+    const folder = getAudioUploadFolder();
     
     let safeName = String(candidateName || "").replace(/[^a-zA-Z0-9_\-]/g, "_").trim();
     let safeInterviewId = String(interviewId || "").replace(/[^a-zA-Z0-9_\-]/g, "_").trim();
