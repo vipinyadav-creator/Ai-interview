@@ -11,7 +11,9 @@ const FRONTEND_URL = "https://rawalwasia-ai-interview.vercel.app";
 // 1) Create a folder in Drive (or use an existing one)
 // 2) Open folder → copy ID from URL: drive.google.com/drive/folders/FOLDER_ID_HERE
 // 3) Share folder with the Google account that owns this script (Editor access)
-const AUDIO_UPLOAD_FOLDER_ID = "1p4fZ5y7mDCRIJcSefywPCMH2CSuzLSbc";
+const AUDIO_UPLOAD_FOLDER_ID = "1nOJjVKbuSeaCzYvzD3BYJ2RhCoJd_1ch";
+const AUDIO_FOLDER_FALLBACK_NAME = "AI Interview Audio";
+const API_VERSION = "3.1.0";
 
 // ============================================================
  // WEB APP ENTRY POINTS
@@ -19,7 +21,12 @@ const AUDIO_UPLOAD_FOLDER_ID = "1p4fZ5y7mDCRIJcSefywPCMH2CSuzLSbc";
 
 function doGet(e) {
   return ContentService
-    .createTextOutput(JSON.stringify({ success: true, message: "Interview BOT API is running." }))
+    .createTextOutput(JSON.stringify({
+      success: true,
+      message: "Interview BOT API is running.",
+      version: API_VERSION,
+      actions: ["sendOTP", "verifyOTP", "getInterviewData", "tts", "uploadAudio", "uploadAudioMp3", "saveResult"]
+    }))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -397,17 +404,31 @@ function saveResult(body) {
 function getAudioUploadFolder() {
   try {
     const folder = DriveApp.getFolderById(AUDIO_UPLOAD_FOLDER_ID);
-    if (!folder) {
-      throw new Error("Folder not found: " + AUDIO_UPLOAD_FOLDER_ID);
-    }
-    return folder;
-  } catch (err) {
-    throw new Error(
-      "Cannot access audio upload folder (" + AUDIO_UPLOAD_FOLDER_ID + "). " +
-      "Create the folder, paste its ID into AUDIO_UPLOAD_FOLDER_ID, and share it with this script owner. " +
-      "Details: " + err.toString()
-    );
+    if (folder) return folder;
+  } catch (primaryErr) {
+    Logger.log("Primary folder unavailable: " + primaryErr.toString());
   }
+
+  const root = DriveApp.getRootFolder();
+  const existing = root.getFoldersByName(AUDIO_FOLDER_FALLBACK_NAME);
+  if (existing.hasNext()) {
+    return existing.next();
+  }
+  return root.createFolder(AUDIO_FOLDER_FALLBACK_NAME);
+}
+
+/** Run from Apps Script editor: Tests TTS + Drive folder access */
+function testDeployment() {
+  const tts = ttsSynthesize("Test audio upload", "en-US");
+  Logger.log("TTS success: " + tts.success);
+
+  const folder = getAudioUploadFolder();
+  Logger.log("Upload folder: " + folder.getName() + " | " + folder.getId());
+
+  const testBlob = Utilities.newBlob("test", "audio/webm", "deployment_test.webm");
+  const file = folder.createFile(testBlob);
+  Logger.log("Test file: " + file.getUrl());
+  return { tts: tts.success, folderId: folder.getId(), fileUrl: file.getUrl() };
 }
 
 function uploadAudioToDrive(base64Data, fileName, mimeType, candidateName, interviewId) {
