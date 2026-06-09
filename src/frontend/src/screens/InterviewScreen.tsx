@@ -191,7 +191,8 @@ export default function InterviewScreen() {
             cleanupCurrentTts();
             const utter = new SpeechSynthesisUtterance(text);
             utter.lang = lang === "hi" ? "hi-IN" : "en-US";
-            utter.rate = 1;
+            utter.rate = 0.9;
+
             utter.onend = () => {
               setIsSpeaking(false);
               onDone();
