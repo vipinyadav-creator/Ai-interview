@@ -1,21 +1,27 @@
 function ttsSynthesize(text, lang = 'en-US') {
   try {
-    // Google Translate TTS hack - reliable and free
+    // Google Translate TTS hack
     const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang === 'hi-IN' ? 'hi' : 'en'}&client=tw-ob&q=${encodeURIComponent(text)}`;
-    
+
     const response = UrlFetchApp.fetch(ttsUrl, { muteHttpExceptions: true });
-    
-    if (response.getResponseCode() === 200) {
+    const statusCode = response.getResponseCode();
+
+    if (statusCode === 200) {
       const audioBlob = response.getBlob();
       const audioBytes = audioBlob.getBytes();
       const audioBase64 = Utilities.base64Encode(audioBytes);
-      
       return { success: true, audioBase64 };
     }
-    
-    throw new Error('TTS API failed: ' + response.getContentText());
-    
+
+    const errText = response.getContentText();
+    return {
+      success: false,
+      message: 'TTS API failed: ' + String(statusCode) + ' ' + String(errText).slice(0, 300),
+      audioBase64: '',
+      statusCode: statusCode,
+    };
   } catch (err) {
     return { success: false, message: err.toString(), audioBase64: '' };
   }
 }
+

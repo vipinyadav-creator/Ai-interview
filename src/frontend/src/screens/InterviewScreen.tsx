@@ -182,11 +182,37 @@ export default function InterviewScreen() {
       try {
         setIsSpeaking(true);
 
-        // Fetch TTS
-        const { audioBase64 } = await ttsSynthesize(text, lang === "hi" ? "hi-IN" : "en-US");
-        const audioUrl = `data:audio/mp3;base64,${audioBase64}`;
+        // Fetch TTS (prefer server TTS, fallback to browser SpeechSynthesis)
+        const ttsRes = await ttsSynthesize(text, lang === "hi" ? "hi-IN" : "en-US");
+        if (!ttsRes?.audioBase64) {
+          // Browser fallback (does not record mixed audio perfectly, but ensures text is spoken)
+          try {
+            setIsSpeaking(true);
+            cleanupCurrentTts();
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = lang === "hi" ? "hi-IN" : "en-US";
+            utter.rate = 1;
+            utter.onend = () => {
+              setIsSpeaking(false);
+              onDone();
+            };
+            utter.onerror = () => {
+              setIsSpeaking(false);
+              onDone();
+            };
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(utter);
+            return;
+          } catch (fallbackErr) {
+            // continue to catch block
+            throw fallbackErr;
+          }
+        }
+
+        const audioUrl = `data:audio/mp3;base64,${ttsRes.audioBase64}`;
 
         cleanupCurrentTts();
+
 
         // Setup a single recording graph for the whole interview. Restarting
         // MediaRecorder creates separate WebM containers, which corrupts downloads.

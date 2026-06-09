@@ -90,17 +90,20 @@ export async function initInterview(
 export async function ttsSynthesize(
   text: string,
   lang: string,
-): Promise<{ audioBase64: string }> {
+): Promise<{ audioBase64: string; message?: string }> {
   const res = await post<{
     success: boolean;
     audioBase64: string;
     message?: string;
+    statusCode?: number;
   }>("tts", { text, lang });
   if (!res.success) {
-    throw new Error(res.message || "TTS synthesis failed");
+    // Do not throw: caller will fallback to browser speech
+    return { audioBase64: "", message: res.message };
   }
-  return { audioBase64: res.audioBase64 };
+  return { audioBase64: res.audioBase64, message: res.message };
 }
+
 
 export async function startResumableUpload(
   _interviewId: string,
