@@ -182,16 +182,54 @@ export default function InterviewScreen() {
       try {
         setIsSpeaking(true);
 
-        // Fetch TTS (prefer server TTS, fallback to browser SpeechSynthesis)
-        const ttsRes = await ttsSynthesize(text, lang === "hi" ? "hi-IN" : "en-US");
+        // Fetch TTS (server-side). If TTS fails, fallback to browser SpeechSynthesis for playback.
+        const ttsRes = await ttsSynthesize(
+          text,
+          lang === "hi" ? "hi-IN" : "en-US"
+        );
+
         if (!ttsRes?.audioBase64) {
-          // Browser fallback (does not record mixed audio perfectly, but ensures text is spoken)
+          // NOTE: SpeechSynthesis fallback ensures listening works even if server TTS fails.
+          // Upload/mixing pipeline will not include this fallback audio.
+          const targetVoiceName = lang === "hi" ? "Madhur" : "Arjun";
+          const targetLang = lang === "hi" ? "hi-IN" : "en-IN";
+
           try {
             setIsSpeaking(true);
             cleanupCurrentTts();
+
+            const voices = window.speechSynthesis.getVoices() || [];
+            // Ensure voices are loaded (some browsers load async)
+            if (!voices.length) {
+              await new Promise<void>((resolve) => {
+                const t = window.setTimeout(() => {
+                  window.speechSynthesis.onvoiceschanged = null;
+                  resolve();
+                }, 800);
+                window.speechSynthesis.onvoiceschanged = () => {
+                  window.clearTimeout(t);
+                  window.speechSynthesis.onvoiceschanged = null;
+                  resolve();
+                };
+              });
+            }
+
+            const voices2 = window.speechSynthesis.getVoices() || [];
+
+
+            const preferred = voices.find((v) => v && v.name === targetVoiceName);
+            const byLang = voices.filter((v) => v && v.lang === targetLang);
+            const bestLangVoice = byLang[0] || voices.find((v) => v && v.lang && v.lang.startsWith(lang === "hi" ? "hi" : "en"));
+            const voiceToUse = preferred || bestLangVoice || voices[0] || null;
+
+            // Log for debugging
+            // eslint-disable-next-line no-console
+            console.log(`[VOICE] ${lang === "hi" ? "Hindi" : "English"} -> ${voiceToUse ? voiceToUse.name : "(none)"} (${voiceToUse ? voiceToUse.lang : "unknown"})`);
+
             const utter = new SpeechSynthesisUtterance(text);
-            utter.lang = lang === "hi" ? "hi-IN" : "en-US";
+            utter.lang = targetLang;
             utter.rate = 0.9;
+            if (voiceToUse) utter.voice = voiceToUse;
 
             utter.onend = () => {
               setIsSpeaking(false);
@@ -201,18 +239,20 @@ export default function InterviewScreen() {
               setIsSpeaking(false);
               onDone();
             };
+
             window.speechSynthesis.cancel();
             window.speechSynthesis.speak(utter);
             return;
-          } catch (fallbackErr) {
-            // continue to catch block
-            throw fallbackErr;
+          } catch (e) {
+            throw new Error(ttsRes?.message || "TTS failed");
           }
         }
 
         const audioUrl = `data:audio/mp3;base64,${ttsRes.audioBase64}`;
 
         cleanupCurrentTts();
+
+
 
 
         // Setup a single recording graph for the whole interview. Restarting
