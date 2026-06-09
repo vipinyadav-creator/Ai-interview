@@ -98,9 +98,10 @@ export async function ttsSynthesize(
     statusCode?: number;
   }>("tts", { text, lang });
   if (!res.success) {
-    // Do not throw: caller will fallback to browser speech
+    // Let caller decide. InterviewScreen will fail and show status properly.
     return { audioBase64: "", message: res.message };
   }
+
   return { audioBase64: res.audioBase64, message: res.message };
 }
 
