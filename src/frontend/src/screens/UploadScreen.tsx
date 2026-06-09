@@ -11,7 +11,6 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../AppContext";
 import { useDebug } from "../debug/DebugContext";
-import DebugPanel from "../debug/DebugPanel";
 import { useLang } from "../LanguageContext";
 import { finalizeInterview } from "../api";
 import { uploadRecordedAudioToDrive } from "../utils/mp3-upload";
@@ -21,7 +20,7 @@ type Step = "preparing" | "uploading" | "finalizing" | "complete" | "error";
 export default function UploadScreen() {
   const { state } = useApp();
   const { t } = useLang();
-  const { steps: debugSteps, logStep } = useDebug();
+  const { logStep } = useDebug();
   const [step, setStep] = useState<Step>("preparing");
   const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState("");
@@ -179,13 +178,6 @@ export default function UploadScreen() {
           </div>
           <span className="text-xl font-bold gradient-brand">{t.brandName}</span>
         </div>
-
-        <details className="mb-4" open>
-          <summary className="cursor-pointer select-none text-xs font-semibold text-muted-foreground mb-2">
-            Debug Diagnostics ▼
-          </summary>
-          <DebugPanel title="Upload & Sheet Diagnostics" steps={debugSteps} />
-        </details>
 
         <div className="card-glass rounded-2xl p-5 sm:p-8">
           {step === "complete" ? (

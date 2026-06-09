@@ -27,7 +27,6 @@ import { useApp } from "../AppContext";
 import { useLang } from "../LanguageContext";
 import { ttsSynthesize } from "../api";
 import { useDebug } from "../debug/DebugContext";
-import DebugPanel from "../debug/DebugPanel";
 import { warmAudioConversion } from "../utils/audio";
 import {
   getVoiceTarget,
@@ -56,7 +55,7 @@ const AUDIO_BARS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 export default function InterviewScreen() {
   const { state, setState } = useApp();
   const { t, lang } = useLang();
-  const { steps: debugSteps, logStep } = useDebug();
+  const { logStep } = useDebug();
   const interviewLang = lang as InterviewLang;
   const {
     candidateName,
@@ -621,16 +620,6 @@ export default function InterviewScreen() {
           style={{ width: `${overallProgress}%` }}
         />
       </div>
-
-      <details className="w-full max-w-3xl mx-auto px-3" open>
-        <summary className="cursor-pointer select-none text-xs font-semibold text-muted-foreground">
-          Debug Diagnostics ▼
-        </summary>
-        <div className="mt-2">
-          <DebugPanel title="Pipeline Diagnostics" steps={debugSteps} />
-        </div>
-      </details>
-
 
       {switchCount >= 3 && switchCount < maxSwitch && (
         <div className="mx-3 sm:mx-4 mt-3 bg-status-amber/10 border border-status-amber/25 rounded-xl px-3 sm:px-4 py-3 flex items-center gap-2">
