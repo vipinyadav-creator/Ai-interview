@@ -27,6 +27,11 @@ import { useApp } from "../AppContext";
 import { useLang } from "../LanguageContext";
 import { ttsSynthesize } from "../api";
 import { warmAudioConversion } from "../utils/audio";
+import DebugPanel, { DebugStep } from "../debug/DebugPanel";
+
+
+
+
 
 declare global {
   interface Window {
@@ -547,6 +552,34 @@ export default function InterviewScreen() {
           style={{ width: `${overallProgress}%` }}
         />
       </div>
+
+      {/* Temporary debug panel (does not affect normal UI) */}
+      <details className="w-full max-w-3xl mx-auto px-3" open={false}>
+        <summary className="cursor-pointer select-none text-xs font-semibold text-muted-foreground">
+          Debug Diagnostics ▼
+        </summary>
+        <div className="mt-2">
+          {/* We will populate steps in a small follow-up edit */}
+          <DebugPanel
+            title="TTS Diagnostics"
+            steps={[
+              { key: "VOICE_SELECTED", status: "idle", ts: Date.now() },
+              { key: "TTS_STARTED", status: "idle", ts: Date.now(), functionName: "playTtsWithMix" },
+              { key: "TTS_COMPLETED", status: "idle", ts: Date.now(), meta: { durationMs: "-" } },
+              {
+                key: "TTS_FAILED",
+                status: "error",
+                ts: Date.now(),
+                functionName: "playTtsWithMix",
+                errorMessage: "debugSteps not wired yet",
+              },
+            ] as DebugStep[]}
+          />
+
+
+        </div>
+      </details>
+
 
       {switchCount >= 3 && switchCount < maxSwitch && (
         <div className="mx-3 sm:mx-4 mt-3 bg-status-amber/10 border border-status-amber/25 rounded-xl px-3 sm:px-4 py-3 flex items-center gap-2">
