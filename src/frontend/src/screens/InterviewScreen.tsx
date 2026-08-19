@@ -89,7 +89,8 @@ export default function InterviewScreen() {
   const navigating = useRef(false);
   const spokenIdxRef = useRef(-1);
   const goNextRef = useRef<() => void>(() => {});
-  const lastSwitchTime = useRef(0);
+  const switchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pageWasHiddenRef = useRef(false);
 
   const totalQuestions = questions.length;
   const currentQuestion = questions[currentIdx];
@@ -145,11 +146,17 @@ export default function InterviewScreen() {
   }, [cleanupCurrentTts]);
 
   // --- Screen switch tracking ---
+  // Uses ONLY the Page Visibility API (document.visibilityState).
+  // Window blur/focus events are intentionally NOT used — they fire
+  // for popups, notifications, incoming calls, and other transient
+  // focus-loss events that are NOT actual tab switches.
+  // A 300ms debounce filters out brief hidden states (e.g. a browser
+  // popup that momentarily hides the page). Only a sustained hidden
+  // state (≥300ms) counts as a genuine tab/page switch.
   useEffect(() => {
-    const handleSwitch = () => {
-      const now = Date.now();
-      if (now - lastSwitchTime.current < 500) return;
-      lastSwitchTime.current = now;
+    pageWasHiddenRef.current = document.hidden;
+
+    const recordPageHide = () => {
       setSwitchCount((c) => {
         const next = c + 1;
         if (next >= maxSwitch) {
@@ -162,15 +169,43 @@ export default function InterviewScreen() {
       });
     };
 
-    const onHide = () => {
-      if (document.hidden) handleSwitch();
+    const onVisibilityChange = () => {
+      const isHidden = document.visibilityState === "hidden";
+
+      if (isHidden) {
+        // Page just went hidden — start a 300ms debounce timer.
+        // If the page comes back visible within 300ms it was a
+        // transient event (popup, notification, etc.) — skip it.
+        if (!pageWasHiddenRef.current && !switchDebounceRef.current) {
+          switchDebounceRef.current = setTimeout(() => {
+            switchDebounceRef.current = null;
+            // Re-check: only count if page is STILL hidden
+            if (document.visibilityState === "hidden") {
+              recordPageHide();
+            }
+          }, 300);
+        }
+        pageWasHiddenRef.current = true;
+        return;
+      }
+
+      // Page became visible again.
+      // If the debounce timer is still pending, the hidden state was
+      // too brief to be a real tab switch — cancel it.
+      if (switchDebounceRef.current) {
+        clearTimeout(switchDebounceRef.current);
+        switchDebounceRef.current = null;
+      }
+      pageWasHiddenRef.current = false;
     };
 
-    document.addEventListener("visibilitychange", onHide);
-    window.addEventListener("blur", handleSwitch);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      document.removeEventListener("visibilitychange", onHide);
-      window.removeEventListener("blur", handleSwitch);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (switchDebounceRef.current) {
+        clearTimeout(switchDebounceRef.current);
+        switchDebounceRef.current = null;
+      }
     };
   }, [maxSwitch, t]);
 
