@@ -173,9 +173,11 @@ export default function InterviewScreen() {
       const isHidden = document.visibilityState === "hidden";
 
       if (isHidden) {
-        // Page just went hidden — start a 300ms debounce timer.
-        // If the page comes back visible within 300ms it was a
-        // transient event (popup, notification, etc.) — skip it.
+        // Page just went hidden — start a 2000ms (2s) debounce timer.
+        // If the page comes back visible within 2s it was a
+        // transient event (popup, quick notification, etc.) — skip it.
+        // NOTE: Browser APIs cannot differentiate between a long tab switch
+        // and an incoming call/screen sleep lasting longer than 2s.
         if (!pageWasHiddenRef.current && !switchDebounceRef.current) {
           switchDebounceRef.current = setTimeout(() => {
             switchDebounceRef.current = null;
@@ -183,7 +185,7 @@ export default function InterviewScreen() {
             if (document.visibilityState === "hidden") {
               recordPageHide();
             }
-          }, 300);
+          }, 2000);
         }
         pageWasHiddenRef.current = true;
         return;
@@ -208,6 +210,67 @@ export default function InterviewScreen() {
       }
     };
   }, [maxSwitch, t]);
+
+  // --- Security monitoring: Screenshots, Copying, and Screen Capture ---
+  useEffect(() => {
+    const recordSecurityViolation = (reason: string) => {
+      console.warn(`Security Violation: ${reason}`);
+      setSwitchCount((c) => {
+        const next = c + 1;
+        if (next >= maxSwitch) {
+          setShowForcedQuit(true);
+        } else {
+          const remaining = maxSwitch - next;
+          toast.warning(`Security Violation (${reason}). ${remaining} warnings remaining!`);
+        }
+        return next;
+      });
+    };
+
+    // 1. Block Copy
+    const onCopy = (e: ClipboardEvent) => {
+      e.preventDefault();
+      recordSecurityViolation("Copying text is not allowed");
+    };
+    document.addEventListener("copy", onCopy);
+
+    // 2. Keyboard Shortcuts (PrintScreen, Cmd+Shift+3/4/5, Print)
+    const onKeyDown = (e: KeyboardEvent) => {
+      // PrintScreen key
+      if (e.key === "PrintScreen") {
+        recordSecurityViolation("Screenshot detected");
+      }
+      // Mac Screenshot shortcuts: Cmd + Shift + 3/4/5
+      if (e.metaKey && e.shiftKey && (e.key === "3" || e.key === "4" || e.key === "5")) {
+        recordSecurityViolation("Screenshot shortcut detected");
+      }
+      // Print shortcuts: Ctrl+P or Cmd+P
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        recordSecurityViolation("Printing is not allowed");
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+
+    // 3. Monkey-patch getDisplayMedia to block screen sharing/recording
+    const originalGetDisplayMedia = navigator.mediaDevices?.getDisplayMedia;
+    if (navigator.mediaDevices) {
+      // @ts-ignore - overriding read-only property for security monkey-patching
+      navigator.mediaDevices.getDisplayMedia = async () => {
+        recordSecurityViolation("Screen capture attempt blocked");
+        throw new Error("Screen capture is disabled during the interview.");
+      };
+    }
+
+    return () => {
+      document.removeEventListener("copy", onCopy);
+      document.removeEventListener("keydown", onKeyDown);
+      if (navigator.mediaDevices && originalGetDisplayMedia) {
+        // @ts-ignore
+        navigator.mediaDevices.getDisplayMedia = originalGetDisplayMedia;
+      }
+    };
+  }, [maxSwitch]);
 
   // --- Timer logic ---
   const startTimer = useCallback(() => {
