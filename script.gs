@@ -197,6 +197,32 @@ function generateInterviewLinksForPending() {
  // OTP SYSTEM
 // ============================================================
 
+function normalizeOtpEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function buildOtpCacheKey(interviewId, email) {
+  return "otp_" + String(interviewId || "").trim() + "_" + normalizeOtpEmail(email);
+}
+
+function getOtpRecord(interviewId, email) {
+  const normalizedEmail = normalizeOtpEmail(email);
+  const primaryKey = buildOtpCacheKey(interviewId, normalizedEmail);
+  const legacyKey = "otp_" + String(interviewId || "").trim();
+
+  const primaryValue = CacheService.getScriptCache().get(primaryKey);
+  if (primaryValue) {
+    return { key: primaryKey, value: JSON.parse(primaryValue) };
+  }
+
+  const legacyValue = CacheService.getScriptCache().get(legacyKey);
+  if (legacyValue) {
+    return { key: legacyKey, value: JSON.parse(legacyValue) };
+  }
+
+  return null;
+}
+
 function sendOTP(email, interviewId) {
   const ss    = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(INTERVIEWS_SHEET);
@@ -204,12 +230,14 @@ function sendOTP(email, interviewId) {
   const COL   = {};
   data[0].forEach((h, i) => COL[h.trim()] = i);
 
+  const normalizedEmail = normalizeOtpEmail(email);
+
   let found = false;
   for (let i = 1; i < data.length; i++) {
     const rowId    = String(data[i][COL["InterviewId"]]    || "").trim();
     const rowEmail = String(data[i][COL["CandidateEmail"]] || "").trim().toLowerCase();
 
-    if (rowId === interviewId && rowEmail === email.toLowerCase()) {
+    if (rowId === interviewId && rowEmail === normalizedEmail) {
       const status = String(data[i][COL["Status"]] || "").trim().toUpperCase();
       if (status === "COMPLETED") {
         return { success: false, message: "This interview has already been completed. You cannot access it again." };
@@ -221,17 +249,19 @@ function sendOTP(email, interviewId) {
 
   if (!found) return { success: false, message: "Email or Interview ID does not match." };
 
-  const otp     = Math.floor(100000 + Math.random() * 900000).toString();
+  const otp     = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
   const expires = Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000;
+  const otpKey  = buildOtpCacheKey(interviewId, normalizedEmail);
 
+  CacheService.getScriptCache().remove("otp_" + String(interviewId || "").trim());
   CacheService.getScriptCache().put(
-    "otp_" + interviewId,
-    JSON.stringify({ otp: otp, email: email.toLowerCase(), expires: expires }),
+    otpKey,
+    JSON.stringify({ otp: otp, email: normalizedEmail, expires: expires }),
     600
   );
 
   MailApp.sendEmail({
-    to: email,
+    to: normalizedEmail,
     subject: "Your OTP for AI Interview - Rawalwasia Group",
     body:
 "Dear Candidate,\n\n" +
@@ -245,13 +275,16 @@ function sendOTP(email, interviewId) {
 }
 
 function verifyOTP(email, otp, interviewId) {
-  const cached = CacheService.getScriptCache().get("otp_" + interviewId);
-  if (!cached) return { success: false, message: "OTP expired." };
+  const normalizedEmail = normalizeOtpEmail(email);
+  const normalizedOtp = String(otp || "").trim();
+  const otpRecord = getOtpRecord(interviewId, normalizedEmail);
 
-  const stored = JSON.parse(cached);
-  if (stored.email !== email.toLowerCase()) return { success: false, message: "Email mismatch." };
-  if (stored.otp   !== otp)                 return { success: false, message: "Invalid OTP." };
-  if (Date.now()   >  stored.expires)       return { success: false, message: "OTP expired." };
+  if (!otpRecord) return { success: false, message: "OTP expired." };
+
+  const stored = otpRecord.value;
+  if (stored.email !== normalizedEmail) return { success: false, message: "Email mismatch." };
+  if (String(stored.otp) !== normalizedOtp) return { success: false, message: "Invalid OTP." };
+  if (Date.now() > Number(stored.expires || 0)) return { success: false, message: "OTP expired." };
 
   const ss    = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(INTERVIEWS_SHEET);
@@ -272,7 +305,8 @@ function verifyOTP(email, otp, interviewId) {
     }
   }
 
-  CacheService.getScriptCache().remove("otp_" + interviewId);
+  CacheService.getScriptCache().remove(otpRecord.key);
+  CacheService.getScriptCache().remove("otp_" + String(interviewId || "").trim());
   return { success: true, message: "OTP verified!" };
 }
 

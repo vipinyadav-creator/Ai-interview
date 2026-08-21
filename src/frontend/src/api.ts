@@ -42,7 +42,8 @@ export async function requestOtp(
   interviewId: string,
   email: string,
 ): Promise<{ success: boolean; message: string }> {
-  return post("sendOTP", { interviewId, email });
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  return post("sendOTP", { interviewId, email: normalizedEmail });
 }
 
 export async function verifyOtp(
@@ -50,10 +51,12 @@ export async function verifyOtp(
   email: string,
   otp: string,
 ): Promise<{ success: boolean; token: string; message: string }> {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedOtp = String(otp || "").trim();
   const res = await post<{ success: boolean; message: string }>("verifyOTP", {
     interviewId,
-    email,
-    otp,
+    email: normalizedEmail,
+    otp: normalizedOtp,
   });
   return { ...res, token: interviewId };
 }
