@@ -198,26 +198,105 @@ function generateInterviewLinksForPending() {
 // ============================================================
 
 function normalizeOtpEmail(email) {
-  return String(email || "").trim().toLowerCase();
+  return String(email || "").trim().replace(/\s+/g, "").toLowerCase();
+}
+
+function normalizeOtpValue(otp) {
+  return String(otp || "").trim().replace(/\s+/g, "");
 }
 
 function buildOtpCacheKey(interviewId, email) {
-  return "otp_" + String(interviewId || "").trim() + "_" + normalizeOtpEmail(email);
+  const normalizedInterviewId = String(interviewId || "").trim();
+  const normalizedEmail = normalizeOtpEmail(email);
+  return "otp_" + normalizedInterviewId + "_" + normalizedEmail;
+}
+
+function buildLegacyOtpCacheKey(interviewId) {
+  return "otp_" + String(interviewId || "").trim();
+}
+
+function safeCacheGet(key) {
+  try {
+    return CacheService.getScriptCache().get(key);
+  } catch (err) {
+    Logger.log("OTP cache read failed for " + key + ": " + err);
+    return null;
+  }
+}
+
+function safeCachePut(key, value, expiresInSeconds) {
+  try {
+    CacheService.getScriptCache().put(key, value, expiresInSeconds);
+  } catch (err) {
+    Logger.log("OTP cache write failed for " + key + ": " + err);
+  }
+}
+
+function safeCacheRemove(key) {
+  try {
+    CacheService.getScriptCache().remove(key);
+  } catch (err) {
+    Logger.log("OTP cache remove failed for " + key + ": " + err);
+  }
+}
+
+function parseOtpRecord(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function storeOtpRecord(interviewId, email, record) {
+  const normalizedEmail = normalizeOtpEmail(email);
+  const primaryKey = buildOtpCacheKey(interviewId, normalizedEmail);
+  const legacyKey = buildLegacyOtpCacheKey(interviewId);
+  const serialized = JSON.stringify(record);
+  const ttlSeconds = OTP_EXPIRY_MINUTES * 60;
+
+  PropertiesService.getScriptProperties().setProperty(primaryKey, serialized);
+  safeCachePut(primaryKey, serialized, ttlSeconds);
+  safeCachePut(legacyKey, serialized, ttlSeconds);
+}
+
+function clearOtpCache(interviewId, email) {
+  const normalizedEmail = normalizeOtpEmail(email);
+  const primaryKey = buildOtpCacheKey(interviewId, normalizedEmail);
+  const legacyKey = buildLegacyOtpCacheKey(interviewId);
+
+  safeCacheRemove(primaryKey);
+  safeCacheRemove(legacyKey);
+  PropertiesService.getScriptProperties().deleteProperty(primaryKey);
 }
 
 function getOtpRecord(interviewId, email) {
   const normalizedEmail = normalizeOtpEmail(email);
   const primaryKey = buildOtpCacheKey(interviewId, normalizedEmail);
-  const legacyKey = "otp_" + String(interviewId || "").trim();
+  const legacyKey = buildLegacyOtpCacheKey(interviewId);
+  const properties = PropertiesService.getScriptProperties();
 
-  const primaryValue = CacheService.getScriptCache().get(primaryKey);
-  if (primaryValue) {
-    return { key: primaryKey, value: JSON.parse(primaryValue) };
-  }
+  const lookups = [
+    { key: primaryKey, raw: safeCacheGet(primaryKey), persistent: false },
+    { key: legacyKey, raw: safeCacheGet(legacyKey), persistent: false },
+    { key: primaryKey, raw: properties.getProperty(primaryKey), persistent: true }
+  ];
 
-  const legacyValue = CacheService.getScriptCache().get(legacyKey);
-  if (legacyValue) {
-    return { key: legacyKey, value: JSON.parse(legacyValue) };
+  for (const lookup of lookups) {
+    const raw = lookup.raw;
+    if (!raw) continue;
+
+    const parsed = parseOtpRecord(raw);
+    if (parsed) {
+      return { key: lookup.key, value: parsed, persistent: lookup.persistent };
+    }
+
+    if (lookup.persistent) {
+      properties.deleteProperty(lookup.key);
+    } else {
+      safeCacheRemove(lookup.key);
+    }
   }
 
   return null;
@@ -235,7 +314,7 @@ function sendOTP(email, interviewId) {
   let found = false;
   for (let i = 1; i < data.length; i++) {
     const rowId    = String(data[i][COL["InterviewId"]]    || "").trim();
-    const rowEmail = String(data[i][COL["CandidateEmail"]] || "").trim().toLowerCase();
+    const rowEmail = normalizeOtpEmail(data[i][COL["CandidateEmail"]]);
 
     if (rowId === interviewId && rowEmail === normalizedEmail) {
       const status = String(data[i][COL["Status"]] || "").trim().toUpperCase();
@@ -249,16 +328,15 @@ function sendOTP(email, interviewId) {
 
   if (!found) return { success: false, message: "Email or Interview ID does not match." };
 
-  const otp     = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+  const otp = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
   const expires = Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000;
-  const otpKey  = buildOtpCacheKey(interviewId, normalizedEmail);
 
-  CacheService.getScriptCache().remove("otp_" + String(interviewId || "").trim());
-  CacheService.getScriptCache().put(
-    otpKey,
-    JSON.stringify({ otp: otp, email: normalizedEmail, expires: expires }),
-    600
-  );
+  clearOtpCache(interviewId, normalizedEmail);
+  storeOtpRecord(interviewId, normalizedEmail, {
+    otp: otp,
+    email: normalizedEmail,
+    expires: expires
+  });
 
   MailApp.sendEmail({
     to: normalizedEmail,
@@ -276,15 +354,18 @@ function sendOTP(email, interviewId) {
 
 function verifyOTP(email, otp, interviewId) {
   const normalizedEmail = normalizeOtpEmail(email);
-  const normalizedOtp = String(otp || "").trim();
+  const normalizedOtp = normalizeOtpValue(otp);
   const otpRecord = getOtpRecord(interviewId, normalizedEmail);
 
   if (!otpRecord) return { success: false, message: "OTP expired." };
 
   const stored = otpRecord.value;
-  if (stored.email !== normalizedEmail) return { success: false, message: "Email mismatch." };
-  if (String(stored.otp) !== normalizedOtp) return { success: false, message: "Invalid OTP." };
-  if (Date.now() > Number(stored.expires || 0)) return { success: false, message: "OTP expired." };
+  if (normalizeOtpEmail(stored.email) !== normalizedEmail) return { success: false, message: "Email mismatch." };
+  if (normalizeOtpValue(stored.otp) !== normalizedOtp) return { success: false, message: "Invalid OTP." };
+  if (Date.now() > Number(stored.expires || 0)) {
+    clearOtpCache(interviewId, normalizedEmail);
+    return { success: false, message: "OTP expired." };
+  }
 
   const ss    = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(INTERVIEWS_SHEET);
@@ -305,8 +386,7 @@ function verifyOTP(email, otp, interviewId) {
     }
   }
 
-  CacheService.getScriptCache().remove(otpRecord.key);
-  CacheService.getScriptCache().remove("otp_" + String(interviewId || "").trim());
+  clearOtpCache(interviewId, normalizedEmail);
   return { success: true, message: "OTP verified!" };
 }
 
