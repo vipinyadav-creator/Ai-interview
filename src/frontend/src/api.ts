@@ -83,16 +83,19 @@ export async function initInterview(
     );
   }
 
-  if (!isRecord(res.candidate)) {
-    throw new Error(
-      "Interview data is missing candidate details. Please contact the interview administrator.",
-    );
-  }
-
-  const candidateName = asString(res.candidate.name)?.trim();
+  const candidate = isRecord(res.candidate)
+    ? res.candidate
+    : isRecord(res.candidateDetails)
+      ? res.candidateDetails
+      : {};
+  const candidateName = asString(
+    candidate.name ?? res.candidateName ?? res.name,
+  )?.trim();
   if (!candidateName) {
+    const apiVersion = asString(res.apiVersion) || "unknown";
+    const responseFields = Object.keys(res).join(", ") || "none";
     throw new Error(
-      "Interview data is missing the candidate name. Please contact the interview administrator.",
+      `Apps Script API v${apiVersion} returned interview data without candidate details (fields: ${responseFields}). Redeploy the Apps Script v3.2.0 code.`,
     );
   }
 
@@ -124,9 +127,9 @@ export async function initInterview(
 
   return {
     candidateName,
-    candidateEmail: "",
-    department: asString(res.candidate.department) || "",
-    designation: asString(res.candidate.designation) || "",
+    candidateEmail: asString(candidate.email ?? res.candidateEmail) || "",
+    department: asString(candidate.department ?? res.department) || "",
+    designation: asString(candidate.designation ?? res.designation) || "",
     questions,
     maxSwitch: 5,
   };

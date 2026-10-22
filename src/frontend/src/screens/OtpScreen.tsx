@@ -33,6 +33,7 @@ export default function OtpScreen() {
     try {
       const res = await requestOtp(state.interviewId, email.trim());
       if (res.success) {
+        setOtp("");
         setOtpSent(true);
         startCooldown();
         toast.success("OTP sent to your email!");
@@ -166,6 +167,9 @@ export default function OtpScreen() {
                     className="bg-secondary border-border text-foreground placeholder:text-muted-foreground text-center text-xl tracking-widest font-mono"
                     onKeyDown={(e) => e.key === "Enter" && handleVerifyOtp()}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    {t.otpExpiryNotice}
+                  </p>
                 </div>
 
                 <Button

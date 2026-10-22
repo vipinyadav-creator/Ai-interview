@@ -4,7 +4,7 @@
 
 const INTERVIEWS_SHEET = "Interviews";
 const QUESTIONS_SHEET = "Question Sets";
-const OTP_EXPIRY_MINUTES = 10;
+const OTP_EXPIRY_MINUTES = 15;
 const FRONTEND_URL = "https://rawalwasia-ai-interview.vercel.app";
 
 // Google Drive folder where interview audio files are saved.
@@ -13,7 +13,7 @@ const FRONTEND_URL = "https://rawalwasia-ai-interview.vercel.app";
 // 3) Share folder with the Google account that owns this script (Editor access)
 const AUDIO_UPLOAD_FOLDER_ID = "1nOJjVKbuSeaCzYvzD3BYJ2RhCoJd_1ch";
 const AUDIO_FOLDER_FALLBACK_NAME = "AI Interview Audio";
-const API_VERSION = "3.1.0";
+const API_VERSION = "3.2.0";
 
 // ============================================================
  // WEB APP ENTRY POINTS
@@ -62,8 +62,9 @@ function doPost(e) {
 }
 
 function respond(data) {
+  const payload = Object.assign({ apiVersion: API_VERSION }, data || {});
   return ContentService
-    .createTextOutput(JSON.stringify(data))
+    .createTextOutput(JSON.stringify(payload))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -79,31 +80,31 @@ function ttsSynthesize(text, lang = 'hi-IN') {
       'hi-IN': 'hi-IN-MadhurNeural'
     };
     const voice = voiceMap[lang] || (lang.startsWith('en') ? 'en-IN-ArjunNeural' : 'hi-IN-MadhurNeural');
-    
+
     const url = `https://faceless.edgetts.net?voice=${voice}&rate=+0%&pitch=+0Hz`;
-    
+
     const options = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       payload: JSON.stringify({ text })
     };
-    
+
     const response = UrlFetchApp.fetch(url, options);
-    
+
     if (response.getResponseCode() !== 200) {
       throw new Error(`EdgeTTS error: ${response.getContentText()}`);
     }
-    
+
     const audioBlob = response.getBlob();
     return { success: true, audioBase64: Utilities.base64Encode(audioBlob.getBytes()) };
   } catch (primaryErr) {
     try {
       const tlParam = lang.startsWith('hi') ? 'hi' : 'en-IN';
       const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${tlParam}&client=tw-ob&ttsspeed=1&q=${encodeURIComponent(text)}`;
-      
+
       const response = UrlFetchApp.fetch(ttsUrl, { muteHttpExceptions: true });
       const audioBlob = response.getBlob();
-      
+
       return { success: true, audioBase64: Utilities.base64Encode(audioBlob.getBytes()) };
     } catch (fallbackErr) {
       return { success: false, message: `TTS failed: ${fallbackErr.toString()}` };
@@ -194,86 +195,197 @@ function generateInterviewLinksForPending() {
 }
 
 // ============================================================
- // OTP SYSTEM
+// OTP SYSTEM — FIXED (Script Properties storage; no CacheService expiry)
 // ============================================================
 
-function sendOTP(email, interviewId) {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(INTERVIEWS_SHEET);
-  const data  = sheet.getDataRange().getValues();
-  const COL   = {};
-  data[0].forEach((h, i) => COL[h.trim()] = i);
+function normalizeOtpEmail(email) {
+  return String(email || "").trim().replace(/\s+/g, "").toLowerCase();
+}
 
-  let found = false;
-  for (let i = 1; i < data.length; i++) {
-    const rowId    = String(data[i][COL["InterviewId"]]    || "").trim();
-    const rowEmail = String(data[i][COL["CandidateEmail"]] || "").trim().toLowerCase();
+function normalizeOtpValue(otp) {
+  return String(otp || "").trim().replace(/\s+/g, "");
+}
 
-    if (rowId === interviewId && rowEmail === email.toLowerCase()) {
-      const status = String(data[i][COL["Status"]] || "").trim().toUpperCase();
-      if (status === "COMPLETED") {
-        return { success: false, message: "This interview has already been completed. You cannot access it again." };
-      }
-      found = true;
-      break;
-    }
-  }
+function buildOtpCacheKey(interviewId, email) {
+  const raw = String(interviewId || "").trim() + "|" + normalizeOtpEmail(email);
+  return "otp_v2_" + Utilities.base64EncodeWebSafe(raw).replace(/=+$/g, "");
+}
 
-  if (!found) return { success: false, message: "Email or Interview ID does not match." };
-
-  const otp     = Math.floor(100000 + Math.random() * 900000).toString();
-  const expires = Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000;
-
-  CacheService.getScriptCache().put(
-    "otp_" + interviewId,
-    JSON.stringify({ otp: otp, email: email.toLowerCase(), expires: expires }),
-    600
+function clearOtpCache(interviewId, email) {
+  PropertiesService.getScriptProperties().deleteProperty(
+    buildOtpCacheKey(interviewId, email)
   );
+}
 
-  MailApp.sendEmail({
-    to: email,
-    subject: "Your OTP for AI Interview - Rawalwasia Group",
-    body:
-"Dear Candidate,\n\n" +
-"Your OTP for AI Interview is: " + otp + "\n\n" +
-"This OTP is valid for " + OTP_EXPIRY_MINUTES + " minutes. Please do not share it with anyone.\n\n" +
-"If you did not request this OTP, please ignore this email.\n\n" +
-"Regards,\nRawalwasia Group HR Team"
-  });
+function getOtpRecord(interviewId, email) {
+  const key = buildOtpCacheKey(interviewId, email);
+  const raw = PropertiesService.getScriptProperties().getProperty(key);
+  if (!raw) return null;
 
-  return { success: true, message: "OTP sent successfully." };
+  try {
+    const value = JSON.parse(raw);
+    if (!value || typeof value !== "object") {
+      PropertiesService.getScriptProperties().deleteProperty(key);
+      return null;
+    }
+    if (Date.now() >= Number(value.expires || 0)) {
+      PropertiesService.getScriptProperties().deleteProperty(key);
+      return null;
+    }
+    return { key: key, value: value };
+  } catch (err) {
+    PropertiesService.getScriptProperties().deleteProperty(key);
+    return null;
+  }
+}
+
+function sendOTP(email, interviewId) {
+  try {
+    const normalizedEmail = normalizeOtpEmail(email);
+    const normalizedInterviewId = String(interviewId || "").trim();
+
+    if (!normalizedEmail || !normalizedInterviewId) {
+      return { success: false, message: "Email and Interview ID are required." };
+    }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss && ss.getSheetByName(INTERVIEWS_SHEET);
+    if (!sheet) {
+      return { success: false, message: "Interviews sheet not found." };
+    }
+
+    const data = sheet.getDataRange().getValues();
+    if (!data.length) {
+      return { success: false, message: "Interviews sheet is empty." };
+    }
+
+    const COL = {};
+    data[0].forEach((h, i) => COL[String(h).trim()] = i);
+    if (COL["InterviewId"] === undefined || COL["CandidateEmail"] === undefined || COL["Status"] === undefined) {
+      return { success: false, message: "Required columns missing: InterviewId, CandidateEmail, Status." };
+    }
+
+    let found = false;
+    for (let i = 1; i < data.length; i++) {
+      const rowId = String(data[i][COL["InterviewId"]] || "").trim();
+      const rowEmail = normalizeOtpEmail(data[i][COL["CandidateEmail"]]);
+      if (rowId === normalizedInterviewId && rowEmail === normalizedEmail) {
+        const status = String(data[i][COL["Status"]] || "").trim().toUpperCase();
+        if (status === "COMPLETED") {
+          return { success: false, message: "This interview has already been completed. You cannot access it again." };
+        }
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      return { success: false, message: "Email or Interview ID does not match." };
+    }
+
+    const otp = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+    const expires = Date.now() + (Number(OTP_EXPIRY_MINUTES) || 10) * 60 * 1000;
+    const key = buildOtpCacheKey(normalizedInterviewId, normalizedEmail);
+    const record = {
+      otp: otp,
+      email: normalizedEmail,
+      interviewId: normalizedInterviewId,
+      expires: expires
+    };
+
+    // Store OTP before sending email; Script Properties do not evict entries like CacheService.
+    PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(record));
+
+    try {
+      MailApp.sendEmail({
+        to: normalizedEmail,
+        subject: "Your OTP for AI Interview - Rawalwasia Group",
+        body:
+          "Dear Candidate,\n\n" +
+          "Your OTP for AI Interview is: " + otp + "\n\n" +
+          "This OTP is valid for " + (Number(OTP_EXPIRY_MINUTES) || 10) + " minutes. Please do not share it with anyone.\n\n" +
+          "If you did not request this OTP, please ignore this email.\n\n" +
+          "Regards,\nRawalwasia Group HR Team"
+      });
+    } catch (mailError) {
+      PropertiesService.getScriptProperties().deleteProperty(key);
+      throw mailError;
+    }
+
+    return { success: true, message: "OTP sent successfully." };
+  } catch (err) {
+    return { success: false, message: "OTP send failed: " + err.message };
+  }
 }
 
 function verifyOTP(email, otp, interviewId) {
-  const cached = CacheService.getScriptCache().get("otp_" + interviewId);
-  if (!cached) return { success: false, message: "OTP expired." };
+  try {
+    const normalizedEmail = normalizeOtpEmail(email);
+    const normalizedOtp = normalizeOtpValue(otp);
+    const normalizedInterviewId = String(interviewId || "").trim();
 
-  const stored = JSON.parse(cached);
-  if (stored.email !== email.toLowerCase()) return { success: false, message: "Email mismatch." };
-  if (stored.otp   !== otp)                 return { success: false, message: "Invalid OTP." };
-  if (Date.now()   >  stored.expires)       return { success: false, message: "OTP expired." };
-
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(INTERVIEWS_SHEET);
-  const data  = sheet.getDataRange().getValues();
-  const COL   = {};
-  data[0].forEach((h, i) => COL[h.trim()] = i);
-
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][COL["InterviewId"]] || "").trim() === interviewId) {
-      if (String(data[i][COL["Status"]] || "").trim().toUpperCase() === "COMPLETED") {
-        return { success: false, message: "Interview already completed. Access denied." };
-      }
-      sheet.getRange(i+1, COL["Status"] +1).setValue("VERIFIED");
-      sheet.getRange(i + 1, COL["VerifiedAt"] + 1).setValue(
-        Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd-MMM-yy HH:mm:ss")
-      );
-      break;
+    if (!normalizedEmail || !normalizedOtp || !normalizedInterviewId) {
+      return { success: false, message: "Email, OTP and Interview ID are required." };
     }
-  }
 
-  CacheService.getScriptCache().remove("otp_" + interviewId);
-  return { success: true, message: "OTP verified!" };
+    const otpRecord = getOtpRecord(normalizedInterviewId, normalizedEmail);
+    if (!otpRecord) {
+      return { success: false, message: "OTP record not found or expired. Please request a new OTP." };
+    }
+
+    const stored = otpRecord.value;
+    if (normalizeOtpEmail(stored.email) !== normalizedEmail) {
+      return { success: false, message: "Email mismatch." };
+    }
+    if (String(stored.interviewId || "").trim() !== normalizedInterviewId) {
+      return { success: false, message: "Interview ID mismatch." };
+    }
+    if (Date.now() >= Number(stored.expires || 0)) {
+      clearOtpCache(normalizedInterviewId, normalizedEmail);
+      return { success: false, message: "OTP expired. Please request a new OTP." };
+    }
+    if (normalizeOtpValue(stored.otp) !== normalizedOtp) {
+      return { success: false, message: "Invalid OTP." };
+    }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss && ss.getSheetByName(INTERVIEWS_SHEET);
+    if (!sheet) {
+      return { success: false, message: "Interviews sheet not found." };
+    }
+
+    const data = sheet.getDataRange().getValues();
+    const COL = {};
+    data[0].forEach((h, i) => COL[String(h).trim()] = i);
+    if (COL["InterviewId"] === undefined || COL["CandidateEmail"] === undefined || COL["Status"] === undefined) {
+      return { success: false, message: "Required columns missing: InterviewId, CandidateEmail, Status." };
+    }
+
+    for (let i = 1; i < data.length; i++) {
+      const rowId = String(data[i][COL["InterviewId"]] || "").trim();
+      const rowEmail = normalizeOtpEmail(data[i][COL["CandidateEmail"]]);
+      if (rowId === normalizedInterviewId && rowEmail === normalizedEmail) {
+        const status = String(data[i][COL["Status"]] || "").trim().toUpperCase();
+        if (status === "COMPLETED") {
+          return { success: false, message: "Interview already completed. Access denied." };
+        }
+
+        sheet.getRange(i + 1, COL["Status"] + 1).setValue("VERIFIED");
+        if (COL["VerifiedAt"] !== undefined) {
+          sheet.getRange(i + 1, COL["VerifiedAt"] + 1).setValue(
+            Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd-MMM-yy HH:mm:ss")
+          );
+        }
+
+        clearOtpCache(normalizedInterviewId, normalizedEmail);
+        return { success: true, message: "OTP verified!" };
+      }
+    }
+
+    return { success: false, message: "Email or Interview ID does not match." };
+  } catch (err) {
+    return { success: false, message: "OTP verification failed: " + err.message };
+  }
 }
 
 // ============================================================
@@ -356,11 +468,15 @@ function getInterviewData(interviewId) {
 
   return {
     success: true,
+    apiVersion: API_VERSION,
     candidate: {
       name: candidate.name,
       department: candidate.department,
       designation: candidate.designation
     },
+    candidateName: candidate.name,
+    department: candidate.department,
+    designation: candidate.designation,
     questions: questions
   };
 }
@@ -478,7 +594,7 @@ function getAudioExtensionFromMimeType(mimeType) {
 /**
  * NEW FUNCTION: Upload MP3 file to Google Drive
  * Called from React frontend via mp3-upload.ts
- * 
+ *
  * @param {string} base64Data - Base64-encoded MP3 audio file
  * @param {string} fileName - Output filename (should include .mp3 extension)
  * @param {string} mimeType - MIME type (should be "audio/mpeg")
@@ -491,52 +607,52 @@ function uploadAudioMp3(base64Data, fileName, mimeType, candidateName, interview
     if (!base64Data || !fileName) {
       throw new Error("Missing required parameters: base64Data or fileName");
     }
-    
+
     mimeType = "audio/mpeg";
-    
+
     const folder = getAudioUploadFolder();
-    
+
     let safeName = String(candidateName || "").replace(/[^a-zA-Z0-9_\-]/g, "_").trim();
     let safeInterviewId = String(interviewId || "").replace(/[^a-zA-Z0-9_\-]/g, "_").trim();
-    
+
     let finalFileName = fileName;
     if (!finalFileName.toLowerCase().endsWith(".mp3")) {
       finalFileName = finalFileName + ".mp3";
     }
-    
+
     Logger.log("Uploading MP3: " + finalFileName);
     Logger.log("Size: " + base64Data.length + " characters (encoded)");
     Logger.log("MIME type: " + mimeType);
     Logger.log("Candidate: " + safeName);
     Logger.log("Interview ID: " + safeInterviewId);
-    
+
     const decodedData = Utilities.base64Decode(base64Data);
-    
+
     const blob = Utilities.newBlob(
       decodedData,
       mimeType || "audio/mpeg",
       finalFileName
     );
-    
+
     const file = folder.createFile(blob);
-    
+
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    
+
     const fileId = file.getId();
     const link = `https://drive.google.com/uc?export=download&id=${fileId}`;
-    
+
     Logger.log("Upload successful!");
     Logger.log("File ID: " + file.getId());
     Logger.log("File name: " + file.getName());
     Logger.log("File size: " + file.getSize() + " bytes");
     Logger.log("Link: " + link);
-    
+
     return {
       success: true,
       link: link,
       message: "MP3 uploaded successfully to Google Drive"
     };
-    
+
   } catch (error) {
     Logger.log("ERROR: " + error.toString());
     return {
@@ -545,4 +661,55 @@ function uploadAudioMp3(base64Data, fileName, mimeType, candidateName, interview
       message: error.toString()
     };
   }
+}
+
+// ============================================================
+// OTP SYSTEM TEST — run testOTPSystem() from the Apps Script editor
+// This test does NOT send email or change any interview sheet status.
+// ============================================================
+function testOTPSystem() {
+  const testInterviewId = "OTP-TEST-" + Utilities.getUuid();
+  const testEmail = "otp-test@example.com";
+  const normalizedEmail = normalizeOtpEmail(testEmail);
+  const key = buildOtpCacheKey(testInterviewId, normalizedEmail);
+  const props = PropertiesService.getScriptProperties();
+  const results = [];
+
+  try {
+    // Test 1: A newly stored OTP can be retrieved before expiry.
+    props.setProperty(key, JSON.stringify({
+      otp: "123456",
+      email: normalizedEmail,
+      interviewId: testInterviewId,
+      expires: Date.now() + 10 * 60 * 1000
+    }));
+    const activeRecord = getOtpRecord(testInterviewId, testEmail);
+    results.push("Active OTP storage/retrieval: " + (activeRecord ? "PASS" : "FAIL"));
+
+    // Test 2: OTP records are isolated by email.
+    const otherEmailRecord = getOtpRecord(testInterviewId, "other-test@example.com");
+    results.push("Email-specific OTP key: " + (!otherEmailRecord ? "PASS" : "FAIL"));
+
+    // Test 3: An OTP with a past expiry is rejected.
+    props.setProperty(key, JSON.stringify({
+      otp: "123456",
+      email: normalizedEmail,
+      interviewId: testInterviewId,
+      expires: Date.now() - 1000
+    }));
+    const expiredRecord = getOtpRecord(testInterviewId, testEmail);
+    results.push("Expired OTP rejection: " + (!expiredRecord ? "PASS" : "FAIL"));
+
+    // Test 4: Confirm the configured expiry is ten minutes.
+    results.push("Expiry configuration is 15 minutes: " + (Number(OTP_EXPIRY_MINUTES) === 15 ? "PASS" : "FAIL"));
+
+  } catch (err) {
+    results.push("TEST ERROR: " + err.message);
+  } finally {
+    props.deleteProperty(key);
+  }
+
+  results.forEach(function(result) { Logger.log(result); });
+  Logger.log("--- OTP TEST FINISHED ---");
+  return results.join("\n");
 }
