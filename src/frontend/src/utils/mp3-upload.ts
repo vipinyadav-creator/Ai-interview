@@ -125,8 +125,10 @@ export async function uploadRecordedAudioToDrive(
   audioBlob: Blob,
   options: UploadOptions,
 ): Promise<{ success: boolean; link: string; message?: string }> {
+  const { onDebug } = options;
+
   try {
-    const { candidateName, interviewId, onProgress, onDebug } = options;
+    const { candidateName, interviewId, onProgress } = options;
 
     onProgress?.(10);
     console.log(`[Drive] Starting audio upload for ${candidateName} (${interviewId})`);

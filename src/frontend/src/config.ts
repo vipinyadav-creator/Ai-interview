@@ -12,15 +12,15 @@ const DEFAULT_BUCKET_NAME = "default-bucket";
 const DEFAULT_PROJECT_ID = "0000000-0000-0000-0000-00000000000";
 
 interface JsonConfig {
-  backend_host: string;
-  backend_canister_id: string;
-  project_id: string;
-  ii_derivation_origin: string;
+  backend_host?: string;
+  backend_canister_id?: string;
+  project_id?: string;
+  ii_derivation_origin?: string;
 }
 
 interface Config {
   backend_host?: string;
-  backend_canister_id: string;
+  backend_canister_id?: string;
   storage_gateway_url: string;
   bucket_name: string;
   project_id: string;
@@ -29,55 +29,47 @@ interface Config {
 
 let configCache: Config | null = null;
 
+function configuredString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 && value !== "undefined"
+    ? value
+    : undefined;
+}
+
 export async function loadConfig(): Promise<Config> {
   if (configCache) {
     return configCache;
   }
-  const backendCanisterId = process.env.CANISTER_ID_BACKEND;
   const envBaseUrl = process.env.BASE_URL || "/";
   const baseUrl = envBaseUrl.endsWith("/") ? envBaseUrl : `${envBaseUrl}/`;
+
+  let fileConfig: JsonConfig = {};
   try {
     const response = await fetch(`${baseUrl}env.json`);
-    const config = (await response.json()) as JsonConfig;
-    if (!backendCanisterId && config.backend_canister_id === "undefined") {
-      console.error("CANISTER_ID_BACKEND is not set");
-      throw new Error("CANISTER_ID_BACKEND is not set");
+    if (!response.ok) {
+      throw new Error(`Unable to load runtime config (HTTP ${response.status})`);
     }
-
-    const fullConfig = {
-      backend_host:
-        config.backend_host === "undefined" ? undefined : config.backend_host,
-      backend_canister_id: (config.backend_canister_id === "undefined"
-        ? backendCanisterId
-        : config.backend_canister_id) as string,
-      storage_gateway_url: process.env.STORAGE_GATEWAY_URL ?? "nogateway",
-      bucket_name: DEFAULT_BUCKET_NAME,
-      project_id:
-        config.project_id !== "undefined"
-          ? config.project_id
-          : DEFAULT_PROJECT_ID,
-      ii_derivation_origin:
-        config.ii_derivation_origin === "undefined"
-          ? undefined
-          : config.ii_derivation_origin,
-    };
-    configCache = fullConfig;
-    return fullConfig;
+    const data: unknown = await response.json();
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      fileConfig = data as JsonConfig;
+    }
   } catch {
-    if (!backendCanisterId) {
-      console.error("CANISTER_ID_BACKEND is not set");
-      throw new Error("CANISTER_ID_BACKEND is not set");
-    }
-    const fallbackConfig = {
-      backend_host: undefined,
-      backend_canister_id: backendCanisterId,
-      storage_gateway_url: DEFAULT_STORAGE_GATEWAY_URL,
-      bucket_name: DEFAULT_BUCKET_NAME,
-      project_id: DEFAULT_PROJECT_ID,
-      ii_derivation_origin: undefined,
-    };
-    return fallbackConfig;
+    // Runtime config is optional for the Apps Script based interview flow.
   }
+
+  const fullConfig: Config = {
+    backend_host: configuredString(fileConfig.backend_host),
+    backend_canister_id:
+      configuredString(fileConfig.backend_canister_id) ??
+      configuredString(process.env.CANISTER_ID_BACKEND),
+    storage_gateway_url:
+      configuredString(process.env.STORAGE_GATEWAY_URL) ??
+      DEFAULT_STORAGE_GATEWAY_URL,
+    bucket_name: DEFAULT_BUCKET_NAME,
+    project_id: configuredString(fileConfig.project_id) ?? DEFAULT_PROJECT_ID,
+    ii_derivation_origin: configuredString(fileConfig.ii_derivation_origin),
+  };
+  configCache = fullConfig;
+  return fullConfig;
 }
 
 function extractAgentErrorMessage(error: string): string {
@@ -126,6 +118,13 @@ export async function createActorWithConfig(
   }
 
   const config = await loadConfig();
+  const backendCanisterId = config.backend_canister_id;
+  if (!backendCanisterId) {
+    throw new Error(
+      "A backend canister ID is required to create the Internet Computer actor. Configure CANISTER_ID_BACKEND to use this backend.",
+    );
+  }
+
   const resolvedOptions = options ?? {};
   const agent = new HttpAgent({
     ...resolvedOptions.agentOptions,
@@ -148,7 +147,7 @@ export async function createActorWithConfig(
   const storageClient = new StorageClient(
     config.bucket_name,
     config.storage_gateway_url,
-    config.backend_canister_id,
+    backendCanisterId,
     config.project_id,
     agent,
   );
@@ -171,7 +170,7 @@ export async function createActorWithConfig(
   };
 
   return createActor(
-    config.backend_canister_id,
+    backendCanisterId,
     uploadFile,
     downloadFile,
     actorOptions,

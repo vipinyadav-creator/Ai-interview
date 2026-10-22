@@ -17,6 +17,16 @@ export interface InitInterviewResponse {
   maxSwitch: number;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
 async function post<T>(
   action: string,
   params: Record<string, unknown>,
@@ -62,27 +72,62 @@ export async function initInterview(
   interviewId: string,
   _token: string,
 ): Promise<InitInterviewResponse> {
-  const res = await post<{
-    success: boolean;
-    message?: string;
-    candidate: { name: string; department: string; designation: string };
-    questions: { uid: string; srNo: number; type: string; question: string }[];
-  }>("getInterviewData", { interviewId });
+  const res = await post<unknown>("getInterviewData", { interviewId });
 
-  if (!res.success)
-    throw new Error(res.message || "Failed to load interview data.");
+  if (!isRecord(res)) {
+    throw new Error("Invalid interview data response from the Apps Script API.");
+  }
+  if (res.success !== true) {
+    throw new Error(
+      asString(res.message) || "Failed to load interview data.",
+    );
+  }
+
+  if (!isRecord(res.candidate)) {
+    throw new Error(
+      "Interview data is missing candidate details. Please contact the interview administrator.",
+    );
+  }
+
+  const candidateName = asString(res.candidate.name)?.trim();
+  if (!candidateName) {
+    throw new Error(
+      "Interview data is missing the candidate name. Please contact the interview administrator.",
+    );
+  }
+
+  if (!Array.isArray(res.questions) || res.questions.length === 0) {
+    throw new Error(
+      "Interview data is missing its question list. Please contact the interview administrator.",
+    );
+  }
+
+  const questions: Question[] = res.questions.map((value, index) => {
+    if (!isRecord(value)) {
+      throw new Error(`Interview question ${index + 1} is invalid.`);
+    }
+
+    const uid = asString(value.uid)?.trim();
+    const question = asString(value.question)?.trim();
+    const srNo = Number(value.srNo);
+    if (!uid || !question || !Number.isFinite(srNo)) {
+      throw new Error(`Interview question ${index + 1} is incomplete.`);
+    }
+
+    return {
+      uid,
+      srNo,
+      questionType: asString(value.type) || "General",
+      question,
+    };
+  });
 
   return {
-    candidateName: res.candidate.name,
+    candidateName,
     candidateEmail: "",
-    department: res.candidate.department,
-    designation: res.candidate.designation,
-    questions: res.questions.map((q) => ({
-      uid: q.uid,
-      srNo: q.srNo,
-      questionType: q.type,
-      question: q.question,
-    })),
+    department: asString(res.candidate.department) || "",
+    designation: asString(res.candidate.designation) || "",
+    questions,
     maxSwitch: 5,
   };
 }

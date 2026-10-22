@@ -39,15 +39,9 @@ import {
 
 
 
-declare global {
-  interface Window {
-    AudioContext: typeof AudioContext;
-    webkitAudioContext: typeof AudioContext;
-    MediaElementAudioSourceNode: typeof MediaElementAudioSourceNode;
-    MediaStreamAudioDestinationNode: typeof MediaStreamAudioDestinationNode;
-    MediaStreamAudioSourceNode: typeof MediaStreamAudioSourceNode;
-  }
-}
+type AudioContextWindow = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
 
 const QUESTION_DURATION = 120;
 const AUDIO_BARS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
@@ -289,7 +283,11 @@ export default function InterviewScreen() {
 
   const ensureMicRecordingStarted = useCallback(async () => {
     if (!audioContextRef.current || audioContextRef.current.state === "closed") {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      const AudioContextClass =
+        window.AudioContext || (window as AudioContextWindow).webkitAudioContext;
+      if (!AudioContextClass) {
+        throw new Error("Web Audio is not supported by this browser.");
+      }
       audioContextRef.current = new AudioContextClass({ sampleRate: 48000 });
     }
 
